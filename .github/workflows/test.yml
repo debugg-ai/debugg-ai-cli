@@ -1,0 +1,60 @@
+name: DebuggAI CLI Tests
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          
+      - name: Install dependencies
+        run: npm ci
+        
+      - name: Build CLI
+        run: npm run build
+        
+      - name: Run linting
+        run: npm run lint
+        
+      - name: Run tests (if any)
+        run: npm test
+        continue-on-error: true
+        
+      # Example of using the CLI with a mock API key
+      - name: Test CLI help command
+        run: node dist/cli.js --help
+        
+      - name: Test CLI test help
+        run: node dist/cli.js test --help
+        
+  # Example job showing how users would use the CLI
+  example-usage:
+    runs-on: ubuntu-latest
+    if: false  # Disabled by default since we don't have real API credentials
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          
+      - name: Install dependencies for your app
+        run: npm install
+        
+      - name: Start development server
+        run: npm run dev &
+        
+      - name: Run DebuggAI Tests
+        env:
+          DEBUGGAI_API_KEY: ${{ secrets.DEBUGGAI_API_KEY }}
+        run: |
+          npx @debugg-ai/cli test --wait-for-server

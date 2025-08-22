@@ -1,0 +1,15 @@
+{
+  "name": "debugg-ai-example-project",
+  "version": "1.0.0",
+  "description": "Example project showing how to use @debugg-ai/cli",
+  "scripts": {
+    "dev": "echo 'Starting development server on port 3000...' && python3 -m http.server 3000",
+    "build": "echo 'Building project...' && mkdir -p dist && echo 'Build complete!'",
+    "test:debugg-ai": "debugg-ai test --wait-for-server",
+    "test:debugg-ai:programmatic": "node programmatic-usage.js"
+  },
+  "dependencies": {
+    "@debugg-ai/cli": "^1.0.0"
+  },
+  "devDependencies": {}
+}

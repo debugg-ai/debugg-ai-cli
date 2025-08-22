@@ -1,0 +1,62 @@
+{
+  "name": "@debugg-ai/cli",
+  "version": "1.0.0",
+  "description": "CLI tool for running DebuggAI tests in CI/CD environments",
+  "main": "dist/index.js",
+  "bin": {
+    "debugg-ai": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "prepublishOnly": "npm run build",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix"
+  },
+  "keywords": [
+    "debugg-ai",
+    "testing",
+    "e2e",
+    "ci",
+    "github-actions",
+    "cli"
+  ],
+  "author": "DebuggAI",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "commander": "^11.0.0",
+    "chalk": "^4.1.2",
+    "simple-git": "^3.19.0",
+    "fs-extra": "^11.1.1",
+    "ora": "^5.4.1",
+    "dotenv": "^16.3.0"
+  },
+  "devDependencies": {
+    "@types/fs-extra": "^11.0.1",
+    "@types/node": "^20.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint": "^8.0.0",
+    "jest": "^29.0.0",
+    "@types/jest": "^29.0.0",
+    "ts-jest": "^29.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/debugg-ai/debugg-ai-extensions.git",
+    "directory": "debugg-ai-cli"
+  },
+  "bugs": {
+    "url": "https://github.com/debugg-ai/debugg-ai-extensions/issues"
+  },
+  "homepage": "https://github.com/debugg-ai/debugg-ai-extensions/tree/main/debugg-ai-cli#readme"
+}
