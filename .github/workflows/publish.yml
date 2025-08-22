@@ -1,4 +1,4 @@
-name: Publish Docker Reader MCP to NPM
+name: Publish @debugg-ai/cli to NPM
 
 on:
   push:
@@ -38,26 +38,33 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '18'
         cache: 'npm'
 
     - name: Install dependencies
       run: npm ci
 
-    - name: Run type check
-      run: npm run typecheck
+    - name: Run lint
+      run: npm run lint
+
+    - name: Run tests
+      run: npm run test
 
     - name: Build project
       run: npm run build
 
     - name: Test build output
       run: |
+        if [ ! -f "dist/cli.js" ]; then
+          echo "CLI build output not found"
+          exit 1
+        fi
         if [ ! -f "dist/index.js" ]; then
-          echo "Build output not found"
+          echo "Index build output not found"
           exit 1
         fi
 
-  docker-test:
+  cli-test:
     runs-on: ubuntu-latest
     needs: test
     steps:
@@ -67,7 +74,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '18'
         cache: 'npm'
 
     - name: Install dependencies
@@ -76,37 +83,32 @@ jobs:
     - name: Build project
       run: npm run build
 
-    - name: Start test containers
+    - name: Test CLI help command
       run: |
-        docker run -d --name test-nginx nginx:alpine
-        docker run -d --name test-redis redis:alpine
-        sleep 5
+        node dist/cli.js --help
+        if [ $? -ne 0 ]; then
+          echo "CLI help command failed"
+          exit 1
+        fi
 
-    - name: Test MCP server with real containers
+    - name: Test CLI version
       run: |
-        timeout 10s bash -c '
-          echo "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":true,\"resources\":true},\"clientInfo\":{\"name\":\"test\",\"version\":\"1.0.0\"}}}" | node dist/index.js > /tmp/init.json
-          if ! grep -q "docker-reader-mcp" /tmp/init.json; then
-            echo "Server initialization failed"
-            exit 1
-          fi
-        '
-        
-        timeout 10s bash -c '
-          echo "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"docker_list_containers\",\"arguments\":{\"all\":false}}}" | node dist/index.js > /tmp/containers.json
-          if ! grep -q "test-nginx\|test-redis" /tmp/containers.json; then
-            echo "Container listing failed"
-            exit 1
-          fi
-        '
+        node dist/cli.js --version
+        if [ $? -ne 0 ]; then
+          echo "CLI version command failed"
+          exit 1
+        fi
 
-    - name: Cleanup test containers
-      if: always()
+    - name: Test programmatic API
       run: |
-        docker rm -f test-nginx test-redis || true
+        node -e "const { DEFAULT_CONFIG } = require('./dist/index.js'); console.log('API loaded successfully');"
+        if [ $? -ne 0 ]; then
+          echo "Programmatic API test failed"
+          exit 1
+        fi
 
   publish:
-    needs: [test, docker-test]
+    needs: [test, cli-test]
     runs-on: ubuntu-latest
     if: (github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, '[skip ci]')) || github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.publish) || startsWith(github.ref, 'refs/tags/v')
     permissions:
@@ -122,7 +124,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '18'
         registry-url: 'https://registry.npmjs.org'
         cache: 'npm'
         
@@ -192,26 +194,32 @@ jobs:
         tag_name: v${{ env.NEW_VERSION }}
         name: Release v${{ env.NEW_VERSION }}
         body: |
-          ## Docker Reader MCP v${{ env.NEW_VERSION }}
+          ## @debugg-ai/cli v${{ env.NEW_VERSION }}
           
-          A fully self-sustaining Model Context Protocol server for reading Docker container logs and information.
+          CLI tool for running DebuggAI tests in CI/CD environments like GitHub Actions.
           
           ## Features
-          - 📋 List Docker containers (running and stopped)
-          - 📖 Read container logs with filtering options
-          - 🔍 Inspect container details and configuration
-          - 📊 Get real-time resource usage statistics
+          - 🧪 Generate E2E tests from git changes
+          - 🚀 GitHub Actions integration
+          - 📊 Test artifact downloads (scripts, recordings, results)
+          - ⚡ Local development server integration
+          - 📋 Test suite management and status checking
           
           ## Installation
           ```bash
-          npm install -g docker-reader-mcp
+          npm install -g @debugg-ai/cli
           ```
           
           ## Usage
           ```bash
-          docker-reader-mcp
+          # Run tests with API key
+          debugg-ai test --api-key YOUR_API_KEY
+          
+          # Use with environment variable
+          export DEBUGGAI_API_KEY=your_api_key
+          debugg-ai test --wait-for-server
           ```
           
-          See [README.md](https://github.com/qosha/docker-reader-mcp/blob/main/README.md) for detailed usage instructions.
+          See [README.md](https://github.com/debugg-ai/debugg-ai-extensions/tree/main/debugg-ai-cli#readme) for detailed usage instructions.
         draft: false
         prerelease: false
