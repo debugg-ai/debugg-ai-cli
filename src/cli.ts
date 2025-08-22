@@ -65,20 +65,20 @@ program
       console.log(chalk.gray(`Repository: ${repoPath}`));
       console.log(chalk.gray(`API Key: ${apiKey.substring(0, 8)}...`));
 
-      // Initialize test manager
+      // Initialize test manager (after all validations pass)
       const testManager = new TestManager({
         apiKey,
         repoPath,
         baseUrl: options.baseUrl,
         testOutputDir: options.outputDir,
-        serverTimeout: parseInt(options.serverTimeout),
-        maxTestWaitTime: parseInt(options.maxTestTime)
+        serverTimeout: parseInt(options.serverTimeout) || 60000,
+        maxTestWaitTime: parseInt(options.maxTestTime) || 600000
       });
 
       // Wait for server if requested
       if (options.waitForServer) {
         const serverPort = parseInt(options.serverPort);
-        const serverTimeout = parseInt(options.serverTimeout);
+        const serverTimeout = parseInt(options.serverTimeout) || 60000;
         
         console.log(chalk.blue(`\nWaiting for development server on port ${serverPort}...`));
         
@@ -111,6 +111,11 @@ program
       }
 
     } catch (error) {
+      // Re-throw test exit errors to prevent them from being handled
+      if (error instanceof Error && (error as any).isSuccessExit) {
+        throw error;
+      }
+      
       console.error(chalk.red('\n💥 Unexpected error:'));
       console.error(error instanceof Error ? error.message : String(error));
       
@@ -176,6 +181,11 @@ program
       }
 
     } catch (error) {
+      // Re-throw test exit errors to prevent them from being handled
+      if (error instanceof Error && (error as any).isSuccessExit) {
+        throw error;
+      }
+      
       console.error(chalk.red('Error checking status:'));
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
@@ -240,6 +250,11 @@ program
       }
 
     } catch (error) {
+      // Re-throw test exit errors to prevent them from being handled
+      if (error instanceof Error && (error as any).isSuccessExit) {
+        throw error;
+      }
+      
       console.error(chalk.red('Error listing test suites:'));
       console.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
@@ -264,17 +279,19 @@ function getStatusColor(status: string): string {
   }
 }
 
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-  console.error(chalk.red('Unhandled Rejection at:'), promise, chalk.red('reason:'), reason);
-  process.exit(1);
-});
+// Handle unhandled promise rejections and uncaught exceptions
+// Only add these handlers if we're not in a test environment
+if (process.env.NODE_ENV !== 'test') {
+  process.on('unhandledRejection', (reason, promise) => {
+    console.error(chalk.red('Unhandled Rejection at:'), promise, chalk.red('reason:'), reason);
+    process.exit(1);
+  });
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-  console.error(chalk.red('Uncaught Exception:'), error);
-  process.exit(1);
-});
+  process.on('uncaughtException', (error) => {
+    console.error(chalk.red('Uncaught Exception:'), error);
+    process.exit(1);
+  });
+}
 
 // Parse command line arguments
 program.parse();

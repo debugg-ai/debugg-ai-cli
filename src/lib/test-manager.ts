@@ -1,5 +1,5 @@
 import { DebuggAIClient, E2eTestSuite, CommitTestRequest } from './api-client';
-import { GitAnalyzer, WorkingChanges, CommitInfo } from './git-analyzer';
+import { GitAnalyzer, WorkingChanges } from './git-analyzer';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import chalk from 'chalk';

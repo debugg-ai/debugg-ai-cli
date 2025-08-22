@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios';
+import axios, { AxiosInstance } from 'axios';
 
 export interface E2eTest {
   uuid?: string;
@@ -238,7 +238,7 @@ export class DebuggAIClient {
    */
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {
-      const response = await this.axios.get('/api/v1/health');
+      await this.axios.get('/api/v1/health');
       return { success: true };
     } catch (error) {
       return {

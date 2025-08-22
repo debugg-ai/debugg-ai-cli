@@ -3,6 +3,7 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.ts', '**/?(*.)+(spec|test).ts'],
+  setupFilesAfterEnv: ['<rootDir>/src/__tests__/setup.ts'],
   transform: {
     '^.+\\.ts$': 'ts-jest',
   },
@@ -18,4 +19,17 @@ module.exports = {
     'lcov',
     'html'
   ],
+  coverageThreshold: {
+    global: {
+      branches: 80,
+      functions: 80,
+      lines: 80,
+      statements: 80
+    }
+  },
+  testPathIgnorePatterns: [
+    '/node_modules/',
+    '/src/__tests__/mocks/',
+    '/src/__tests__/setup.ts'
+  ]
 };
