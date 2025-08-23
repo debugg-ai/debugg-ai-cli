@@ -39,6 +39,9 @@ describe('TestManager', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     
+    // Clean environment variables to ensure test isolation
+    delete process.env.GITHUB_SHA;
+    
     // Setup fs-extra mocks
     setupMockFileSystem({
       '/test/repo/.git': true,
@@ -113,6 +116,12 @@ describe('TestManager', () => {
         ],
         branchInfo: { branch: 'main', commitHash: 'abc123' }
       });
+      mockGitAnalyzer.getCommitChanges.mockResolvedValue({
+        changes: [
+          { status: 'M', file: 'src/test.ts', diff: 'test diff' }
+        ],
+        branchInfo: { branch: 'main', commitHash: 'abc123' }
+      });
       mockGitAnalyzer.getRepoName.mockReturnValue('test-repo');
       mockClient.createCommitTestSuite.mockResolvedValue({
         success: true,
@@ -166,6 +175,9 @@ describe('TestManager', () => {
     });
 
     it('should skip test generation when no changes detected', async () => {
+      // Ensure GITHUB_SHA is not set to avoid interference
+      delete process.env.GITHUB_SHA;
+      
       mockGitAnalyzer.getWorkingChanges.mockResolvedValue({
         changes: [],
         branchInfo: { branch: 'main', commitHash: 'abc123' }
