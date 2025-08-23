@@ -71,7 +71,11 @@ describe('GitAnalyzer', () => {
   });
 
   describe('getCurrentBranchInfo', () => {
-    it('should get branch info from git commands', async () => {
+    it('should get branch info from git commands when no env vars set', async () => {
+      // Ensure no environment variables are set
+      delete process.env.GITHUB_HEAD_REF;
+      delete process.env.GITHUB_REF_NAME;
+      
       mockSimpleGit.revparse
         .mockResolvedValueOnce('feature/test-branch')
         .mockResolvedValueOnce('abc123def456');
@@ -92,44 +96,69 @@ describe('GitAnalyzer', () => {
 
       const result = await analyzer.getCurrentBranchInfo();
 
+      // When env var is set, should only call revparse once for commit hash
+      expect(mockSimpleGit.revparse).toHaveBeenCalledWith(['HEAD']);
+      expect(mockSimpleGit.revparse).toHaveBeenCalledTimes(1);
       expect(result.branch).toBe('feature/env-branch');
+      expect(result.commitHash).toBe('abc123def456');
       
       delete process.env.GITHUB_HEAD_REF;
     });
 
     it('should use GITHUB_REF_NAME when GITHUB_HEAD_REF is not available', async () => {
+      delete process.env.GITHUB_HEAD_REF; // Ensure GITHUB_HEAD_REF is not set
       process.env.GITHUB_REF_NAME = 'refs/heads/main';
       mockSimpleGit.revparse.mockResolvedValue('abc123def456');
 
       const result = await analyzer.getCurrentBranchInfo();
 
+      // When env var is set, should only call revparse once for commit hash
+      expect(mockSimpleGit.revparse).toHaveBeenCalledWith(['HEAD']);
+      expect(mockSimpleGit.revparse).toHaveBeenCalledTimes(1);
       expect(result.branch).toBe('main');
+      expect(result.commitHash).toBe('abc123def456');
       
       delete process.env.GITHUB_REF_NAME;
     });
 
     it('should handle detached HEAD state', async () => {
+      // Ensure no environment variables are set  
+      delete process.env.GITHUB_HEAD_REF;
+      delete process.env.GITHUB_REF_NAME;
+      
       mockSimpleGit.revparse
         .mockResolvedValueOnce('HEAD')
         .mockResolvedValueOnce('abc123def456');
 
       const result = await analyzer.getCurrentBranchInfo();
 
+      expect(mockSimpleGit.revparse).toHaveBeenCalledWith(['--abbrev-ref', 'HEAD']);
+      expect(mockSimpleGit.revparse).toHaveBeenCalledWith(['HEAD']);
       expect(result.branch).toBe('main'); // fallback for detached HEAD
+      expect(result.commitHash).toBe('abc123def456');
     });
 
     it('should remove refs/heads/ prefix', async () => {
+      delete process.env.GITHUB_HEAD_REF; // Ensure GITHUB_HEAD_REF is not set
       process.env.GITHUB_REF_NAME = 'refs/heads/feature/test';
       mockSimpleGit.revparse.mockResolvedValue('abc123def456');
 
       const result = await analyzer.getCurrentBranchInfo();
 
+      // When env var is set, should only call revparse once for commit hash
+      expect(mockSimpleGit.revparse).toHaveBeenCalledWith(['HEAD']);
+      expect(mockSimpleGit.revparse).toHaveBeenCalledTimes(1);
       expect(result.branch).toBe('feature/test');
+      expect(result.commitHash).toBe('abc123def456');
       
       delete process.env.GITHUB_REF_NAME;
     });
 
     it('should handle errors gracefully', async () => {
+      // Ensure no environment variables are set
+      delete process.env.GITHUB_HEAD_REF;
+      delete process.env.GITHUB_REF_NAME;
+      
       mockSimpleGit.revparse.mockRejectedValue(new Error('Git error'));
 
       const result = await analyzer.getCurrentBranchInfo();
@@ -143,6 +172,10 @@ describe('GitAnalyzer', () => {
 
   describe('getWorkingChanges', () => {
     beforeEach(() => {
+      // Ensure no environment variables are set so git commands are used
+      delete process.env.GITHUB_HEAD_REF;
+      delete process.env.GITHUB_REF_NAME;
+      
       // Mock getCurrentBranchInfo
       mockSimpleGit.revparse
         .mockResolvedValueOnce('main')
@@ -306,6 +339,10 @@ describe('GitAnalyzer', () => {
     const commitHash = 'abc123def';
 
     beforeEach(() => {
+      // Ensure no environment variables are set so git commands are used
+      delete process.env.GITHUB_HEAD_REF;
+      delete process.env.GITHUB_REF_NAME;
+      
       // Mock getCurrentBranchInfo
       mockSimpleGit.revparse
         .mockResolvedValueOnce('main')
