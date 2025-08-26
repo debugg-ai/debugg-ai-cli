@@ -13,6 +13,8 @@ export interface TestManagerOptions {
   waitForServer?: boolean;
   serverTimeout?: number;
   maxTestWaitTime?: number;
+  tunnelUrl?: string;
+  tunnelMetadata?: Record<string, any> | undefined;
 }
 
 export interface TestResult {
@@ -52,6 +54,21 @@ export class TestManager {
   }
 
   /**
+   * Create TestManager with tunnel URL support
+   */
+  static withTunnel(
+    options: Omit<TestManagerOptions, 'tunnelUrl' | 'tunnelMetadata'>,
+    tunnelUrl: string,
+    tunnelMetadata?: Record<string, any>
+  ): TestManager {
+    return new TestManager({
+      ...options,
+      tunnelUrl,
+      tunnelMetadata
+    });
+  }
+
+  /**
    * Run tests for the current commit or working changes
    */
   async runCommitTests(): Promise<TestResult> {
@@ -80,7 +97,20 @@ export class TestManager {
 
       this.spinner.text = `Authenticated as user: ${user.email || user.id}`;
 
-      // Step 4: Analyze git changes
+      // Step 4: Validate tunnel URL if provided
+      if (this.options.tunnelUrl) {
+        this.spinner.text = 'Validating tunnel URL...';
+        const validation = await this.client.validateTunnelUrl(this.options.tunnelUrl);
+        
+        if (!validation.accessible) {
+          console.warn(chalk.yellow(`⚠ Tunnel URL validation failed: ${validation.error}`));
+          console.warn(chalk.yellow('Proceeding with tunnel URL anyway...'));
+        } else {
+          this.spinner.text = `Tunnel URL validated (${validation.responseTime}ms response time)`;
+        }
+      }
+
+      // Step 5: Analyze git changes
       this.spinner.text = 'Analyzing git changes...';
       const changes = await this.analyzeChanges();
       
@@ -94,10 +124,10 @@ export class TestManager {
 
       this.spinner.text = `Found ${changes.changes.length} changed files`;
 
-      // Step 5: Create test description
-      const testDescription = this.createTestDescription(changes);
+      // Step 6: Create test description with enhanced context analysis
+      const testDescription = await this.createTestDescription(changes);
 
-      // Step 6: Submit test request
+      // Step 7: Submit test request
       this.spinner.text = 'Creating test suite...';
       const testRequest: CommitTestRequest = {
         repoName: this.gitAnalyzer.getRepoName(),
@@ -108,7 +138,13 @@ export class TestManager {
         testDescription
       };
 
-      const response = await this.client.createCommitTestSuite(testRequest);
+      const response = this.options.tunnelUrl 
+        ? await this.client.createCommitTestSuiteWithTunnel(
+            testRequest, 
+            this.options.tunnelUrl, 
+            this.options.tunnelMetadata
+          )
+        : await this.client.createCommitTestSuite(testRequest);
       
       if (!response.success || !response.testSuiteUuid) {
         throw new Error(`Failed to create test suite: ${response.error}`);
@@ -116,7 +152,7 @@ export class TestManager {
 
       this.spinner.text = `Test suite created: ${response.testSuiteUuid}`;
 
-      // Step 7: Wait for tests to complete
+      // Step 8: Wait for tests to complete
       this.spinner.text = 'Waiting for tests to complete...';
       const completedSuite = await this.client.waitForTestSuiteCompletion(
         response.testSuiteUuid,
@@ -138,11 +174,11 @@ export class TestManager {
         throw new Error('Test suite timed out or failed to complete');
       }
 
-      // Step 8: Download and save test artifacts
+      // Step 9: Download and save test artifacts
       this.spinner.text = 'Downloading test artifacts...';
       const testFiles = await this.saveTestArtifacts(completedSuite);
 
-      // Step 9: Report results
+      // Step 10: Report results
       this.reportResults(completedSuite);
 
       this.spinner.succeed(`Tests completed successfully! Generated ${testFiles.length} test files`);
@@ -219,32 +255,64 @@ export class TestManager {
   /**
    * Create a comprehensive test description based on changes
    */
-  private createTestDescription(changes: WorkingChanges): string {
-    const changedFiles = changes.changes.map(c => c.file).join(', ');
-    const fileCount = changes.changes.length;
+  private async createTestDescription(changes: WorkingChanges): Promise<string> {
     const commitHash = changes.branchInfo.commitHash;
     const branch = changes.branchInfo.branch;
+    const fileCount = changes.changes.length;
 
-    // Analyze file types to provide more context
-    const fileTypes = this.analyzeFileTypes(changes.changes.map(c => c.file));
-    
-    return `Generate comprehensive E2E tests for the changes in commit ${commitHash.substring(0, 8)} on branch ${branch}.
+    // Use enhanced context analysis inspired by backend architecture
+    const contextAnalysis = await this.gitAnalyzer.analyzeChangesWithContext(changes.changes);
 
-Changed Files (${fileCount}): ${changedFiles}
+    // Build focused description based on analysis
+    let description = `Generate comprehensive E2E tests for the changes in commit ${commitHash.substring(0, 8)} on branch ${branch}.
 
-File Types Affected:
-${fileTypes.map(type => `- ${type.type}: ${type.count} files (${type.files.slice(0, 3).join(', ')}${type.files.length > 3 ? '...' : ''})`).join('\n')}
+Change Analysis:
+- Total Files: ${fileCount}
+- Complexity: ${contextAnalysis.changeComplexity.toUpperCase()}
+- Languages: ${contextAnalysis.affectedLanguages.join(', ')}`;
 
-Please analyze the changes and generate Playwright tests that:
-1. Test the functionality that was added, modified, or fixed
-2. Include both positive and negative test cases
-3. Test edge cases and error conditions
-4. Follow best practices for E2E testing
-5. Include proper assertions and error handling
-6. Test user-facing functionality affected by these changes
-7. Ensure tests are maintainable and well-documented
+    // Add specific areas of focus based on changes
+    if (contextAnalysis.suggestedFocusAreas.length > 0) {
+      description += `
 
-Focus on creating robust tests that validate the user experience and catch potential regressions.`;
+Focus Areas:
+${contextAnalysis.suggestedFocusAreas.map(area => `- ${area}`).join('\n')}`;
+    }
+
+    // Add component-specific context
+    if (contextAnalysis.componentChanges.length > 0) {
+      description += `
+
+Components Changed:
+${contextAnalysis.componentChanges.slice(0, 5).map(file => `- ${file}`).join('\n')}${contextAnalysis.componentChanges.length > 5 ? '\n- ...' : ''}`;
+    }
+
+    // Add routing context
+    if (contextAnalysis.routingChanges.length > 0) {
+      description += `
+
+Routing Changes:
+${contextAnalysis.routingChanges.map(file => `- ${file}`).join('\n')}`;
+    }
+
+    // Add configuration context
+    if (contextAnalysis.configChanges.length > 0) {
+      description += `
+
+Configuration Changes:
+${contextAnalysis.configChanges.map(file => `- ${file}`).join('\n')}`;
+    }
+
+    description += `
+
+Test Requirements:
+1. Generate Playwright tests focused on the identified change areas
+2. Test both positive and negative scenarios for modified functionality
+3. Include edge cases and error handling for ${contextAnalysis.changeComplexity} complexity changes
+4. Focus testing on: ${contextAnalysis.suggestedFocusAreas.slice(0, 3).join(', ')}
+5. Ensure tests cover the interaction between changed ${contextAnalysis.affectedLanguages.join(' and ')} components`;
+
+    return description;
   }
 
   /**

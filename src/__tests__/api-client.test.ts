@@ -26,7 +26,7 @@ describe('DebuggAIClient', () => {
         baseURL: mockConfig.baseUrl,
         timeout: mockConfig.timeout,
         headers: {
-          'Authorization': `Bearer ${mockConfig.apiKey}`,
+          'Authorization': `Token ${mockConfig.apiKey}`,
           'Content-Type': 'application/json',
           'User-Agent': '@debugg-ai/cli'
         }
@@ -68,8 +68,20 @@ describe('DebuggAIClient', () => {
 
       const result = await client.createCommitTestSuite(mockRequest);
 
-      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/v1/e2es/commit-suite', {
+      expect(mockAxiosInstance.post).toHaveBeenCalledWith('/api/v1/commit-suites/', {
         ...mockRequest,
+        workingChanges: expect.arrayContaining([
+          expect.objectContaining({
+            file: expect.any(String),
+            status: expect.any(String),
+            absPath: expect.any(String)
+          })
+        ]),
+        context: expect.objectContaining({
+          source: 'cli',
+          version: '1.0.1',
+          timestamp: expect.any(String)
+        }),
         timestamp: expect.any(String)
       });
       expect(result).toEqual(mockResponse);
@@ -125,7 +137,7 @@ describe('DebuggAIClient', () => {
 
       const result = await client.getTestSuiteStatus(suiteUuid);
 
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith(`/api/v1/e2es/suites/${suiteUuid}`);
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith(`/api/v1/test-suites/${suiteUuid}/`);
       expect(result).toEqual(mockSuite);
     });
 
@@ -249,7 +261,7 @@ describe('DebuggAIClient', () => {
         page: 1
       });
 
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/v1/e2es/suites', {
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/v1/test-suites/', {
         params: {
           repo_name: 'test-repo',
           branch_name: 'main',
@@ -269,7 +281,7 @@ describe('DebuggAIClient', () => {
 
       await client.listTestSuites();
 
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/v1/e2es/suites', {
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/v1/test-suites/', {
         params: {
           repo_name: undefined,
           branch_name: undefined,
@@ -301,7 +313,7 @@ describe('DebuggAIClient', () => {
 
       const result = await client.getTestDetails(testUuid);
 
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith(`/api/v1/e2es/tests/${testUuid}`);
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith(`/api/v1/e2e-tests/${testUuid}/`);
       expect(result).toEqual(mockTest);
     });
 

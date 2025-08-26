@@ -26,6 +26,9 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "src/backend/**/*",
+    "src/task-handlers/**/*",
+    "src/code-gen/**/*"
   ]
 }

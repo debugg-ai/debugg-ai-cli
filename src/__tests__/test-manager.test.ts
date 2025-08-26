@@ -65,7 +65,8 @@ describe('TestManager', () => {
       getCurrentBranchInfo: jest.fn(),
       getWorkingChanges: jest.fn(),
       getCommitChanges: jest.fn(),
-      getRepoName: jest.fn()
+      getRepoName: jest.fn(),
+      analyzeChangesWithContext: jest.fn()
     } as any;
     
     MockedGitAnalyzer.mockImplementation(() => mockGitAnalyzer);
@@ -123,6 +124,17 @@ describe('TestManager', () => {
         branchInfo: { branch: 'main', commitHash: 'abc123' }
       });
       mockGitAnalyzer.getRepoName.mockReturnValue('test-repo');
+      mockGitAnalyzer.analyzeChangesWithContext.mockResolvedValue({
+        totalFiles: 1,
+        fileTypes: { 'TypeScript': 1 },
+        componentChanges: ['src/test.ts'],
+        routingChanges: [],
+        configChanges: [],
+        testChanges: [],
+        affectedLanguages: ['TypeScript'],
+        changeComplexity: 'medium',
+        suggestedFocusAreas: ['Component logic']
+      });
       mockClient.createCommitTestSuite.mockResolvedValue({
         success: true,
         testSuiteUuid: 'suite-123'
@@ -463,7 +475,7 @@ describe('TestManager', () => {
   });
 
   describe('createTestDescription', () => {
-    it('should create comprehensive test description', () => {
+    it('should create comprehensive test description', async () => {
       const mockChanges = {
         changes: [
           { status: 'M', file: 'src/component.tsx' },
@@ -476,16 +488,28 @@ describe('TestManager', () => {
         }
       };
 
-      const description = (testManager as any).createTestDescription(mockChanges);
+      mockGitAnalyzer.analyzeChangesWithContext.mockResolvedValue({
+        totalFiles: 3,
+        fileTypes: { 'TypeScript': 2, 'Stylesheets': 1 },
+        componentChanges: ['src/component.tsx', 'src/utils.ts'],
+        routingChanges: [],
+        configChanges: [],
+        testChanges: [],
+        affectedLanguages: ['TypeScript', 'CSS'],
+        changeComplexity: 'medium',
+        suggestedFocusAreas: ['Component logic', 'Styling']
+      });
+
+      const description = await (testManager as any).createTestDescription(mockChanges);
 
       expect(description).toContain('abcd1234');
       expect(description).toContain('feature/new-feature');
-      expect(description).toContain('src/component.tsx, src/utils.ts, styles/main.css');
-      expect(description).toContain('TypeScript: 2 files');
-      expect(description).toContain('Stylesheets: 1 files');
+      expect(description).toContain('Component logic');
+      expect(description).toContain('Styling');
+      expect(description).toContain('TypeScript');
     });
 
-    it('should handle different file types correctly', () => {
+    it('should handle different file types correctly', async () => {
       const mockChanges = {
         changes: [
           { status: 'M', file: 'src/app.js' },
@@ -499,11 +523,23 @@ describe('TestManager', () => {
         }
       };
 
-      const description = (testManager as any).createTestDescription(mockChanges);
+      mockGitAnalyzer.analyzeChangesWithContext.mockResolvedValue({
+        totalFiles: 4,
+        fileTypes: { 'JavaScript': 2, 'Documentation': 1, 'Configuration': 1 },
+        componentChanges: ['src/app.js'],
+        routingChanges: [],
+        configChanges: ['package.json'],
+        testChanges: ['test/spec.test.js'],
+        affectedLanguages: ['JavaScript'],
+        changeComplexity: 'low',
+        suggestedFocusAreas: ['Application logic', 'Configuration']
+      });
 
-      expect(description).toContain('JavaScript: 2 files'); // src/app.js and test/spec.test.js (test files are also categorized as JavaScript)
-      expect(description).toContain('Documentation: 1 files');
-      expect(description).toContain('Configuration: 1 files');
+      const description = await (testManager as any).createTestDescription(mockChanges);
+
+      expect(description).toContain('JavaScript');
+      expect(description).toContain('Application logic');
+      expect(description).toContain('Configuration');
     });
   });
 

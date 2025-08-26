@@ -1,0 +1,374 @@
+import { AxiosRequestConfig } from "axios";
+
+import type {
+    ArtifactType,
+    EmbeddingsCacheResponse
+} from "./interface.js";
+
+
+export interface PaginatedResponse<T> {
+    count: number;
+    next: string | null;
+    previous: string | null;
+    results: T[];
+}
+
+export interface AxiosResponse<T> {
+    data: T;
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    config: AxiosRequestConfig;
+}
+
+// Base types for common fields
+interface BaseModel {
+    id: number;
+    uuid: string;
+    timestamp: string; // ISO datetime string
+    lastMod: string; // ISO datetime string
+}
+
+// User information (from PublicUserInfoSerializer)
+export interface PublicUserInfo {
+    uuid: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    company: string; // company name
+}
+
+export interface Message {
+    uuid: string;
+    sender: string;
+    role: string;
+    content: string;
+    cleanedTickedContent: string | null;
+    jsonContent: Record<string, any> | null;
+    timestamp: string;
+    lastMod: string;
+}
+
+export interface Conversation {
+    uuid: string;
+    creatorUuid: string;
+    user: number;
+    company: number;
+    messages: Message[];
+    timestamp: string;
+    lastMod: string;
+}
+
+export interface Issue {
+    uuid: string;
+    project: number;
+    title?: string;
+    message?: string;
+    environment: string;
+    status: "open" | "ongoing" | "resolved" | "archived";
+    level: Level;
+    priority: "low" | "medium" | "high" | "alert";
+    codeSingleLine: string | undefined;
+    lineNumber: number;
+    columnNumber: number;
+    eventsCount: number;
+    filePath: string;
+    firstSeen: string;
+    lastSeen: string;
+    tags?: Record<string, any>;
+    participants: number[];
+    timestamp: string;
+    lastMod: string;
+    overview: LogOverview;
+    solution?: IssueSolution;
+    suggestions?: IssueSuggestion[];
+}
+
+/**
+ * Snippet update for a file change
+ */
+export interface SnippetUpdate {
+    startLine: number; // 1-indexed
+    endLine: number; // 1-indexed
+    newContent: string;
+    prevContent: string;
+}
+
+/**
+ * File change for an issue solution
+ */
+export interface FileChange {
+    filePath: string;
+    snippetsToUpdate: SnippetUpdate[];
+}
+
+/**
+ * Fix for an issue
+ */
+export interface IssueSolution {
+    uuid: string;
+    changes: FileChange[];
+}
+/**
+ * Issue suggestion
+ */
+export interface IssueSuggestion {
+    filePath: string;
+    errorCount: number;
+    lineNumber: string;
+    columnNumber: string;
+    message: string;
+}
+
+/**
+ * Paginated response for issues
+ */
+export interface PaginatedIssueResponse extends PaginatedResponse<Issue> {
+}
+
+/**
+ * Paginated response for issue suggestions
+ */
+export interface PaginatedIssueSuggestionResponse extends PaginatedResponse<IssueSuggestion> {
+}
+
+
+export type Level = "DEBUG" | "INFO" | "WARNING" | "ERROR" | "FATAL" | "METRIC";
+
+
+export interface LogOverview {
+    title: string;
+    message: string;
+    args: unknown[];                       // e.g. ['foo', 'bar']
+    kwargs: Record<string, unknown>;       // e.g. { baz: 'qux' }
+    stackTrace: string | null;             // e.g. "File "backend/transactions/tasks.py", line 10, in <module>\n    raise Exception('test')\nException: test"
+
+    exceptionType?: string | null;        // e.g. "AttributeError"
+    handled?: string | null;               // e.g. "no"
+    mechanism?: string | null;             // e.g. "celery"
+    environment?: string | null;           // e.g. "production"
+    traceId?: string | null;              // e.g. "6318bd31dbf843b48380bbfe3979233b"
+    celeryTaskId?: string | null;        // e.g. "396bf247-f397-4ef3-a0b7-b9d77a803ed2"
+    runtimeVersion?: string | null;       // e.g. "3.11.5"
+    serverName?: string | null;           // e.g. "ip-10-0-1-25.us-east-2.compute.internal"
+    eventId?: string | null;             // e.g. "fda64423"
+    timestamp?: string | null;             // e.g. "2023-03-10T06:20:21.000Z"
+    level?: Level | null;                 // e.g. "error", "warning"
+    filePath?: string | null;             // e.g. "backend/transactions/tasks.py"
+    messagePreview?: string | null;       // e.g. "AttributeError: 'NoneType' object..."
+}
+
+
+// TODO: Remove this
+export interface FileResult {
+    uuid: string;
+    company: number;
+    level: Level | null;
+    title: string;
+    message: string | null;
+    lineNumber: number | null;
+    columnNumber: number | null;
+    errorCount: number;
+    suggestions: Array<{
+        lineNumber: number;
+        message: string;
+        filePath: string;
+        errorCount: number;
+    }>;
+    overview: LogOverview;
+}
+
+export interface Index<T extends ArtifactType> {
+    id: string;
+    name: string;
+    description: string;
+    embeddings: EmbeddingsCacheResponse<T>;
+    timestamp: string;
+    lastMod: string;
+}
+
+export interface CoverageResponse {
+    uuid: string;
+    company: string;
+    filePath: string;
+    repoName: string;
+    branchName: string;
+    testFilePath: string;
+    testFileContent: string;
+    coverage: null;
+    timestamp: string;
+    lastMod: string;
+}
+
+export interface Host {
+    id: number;
+    name: string;
+}
+
+export interface E2eTest {
+    id: string;
+    uuid: string;
+    project: number;
+    projectName?: string | null;
+    tunnelKey?: string | null;
+    curRun?: E2eRun | null;
+    host?: Host | null;
+    name: string;
+    description?: string | null;
+    agent?: number | null;
+    agentTaskDescription?: string | null;
+    testScript: string; // path or URL
+    timestamp: string;
+    lastMod: string;
+    createdBy?: number | null;
+}
+
+export type E2eRunStatus = 'pending' | 'running' | 'completed';
+export type E2eRunOutcome = 'pending' | 'skipped' | 'unknown' | 'pass' | 'fail';
+export type E2eRunType = 'generate' | 'run';
+
+export interface E2eRunMetrics {
+    executionTime: number;
+    numSteps: number;
+}
+
+
+export interface E2eRun {
+    id: number;
+    uuid: string;
+    timestamp: string;
+    lastMod: string;
+    key: string;
+    runType: E2eRunType;
+    test?: E2eTest | null;
+    tunnelKey?: string | null;
+    status: E2eRunStatus;
+    outcome: E2eRunOutcome;
+    conversations?: Conversation[]; // array of Conversations
+    startedBy?: number | null;
+    runOnHost?: number | null;
+    targetUrl?: string | null;
+    runGif?: string | null;  // Url to the gif file containing the run
+    runScript?: string | null;  // Url to the script file (js, py, ts, etc) with playwright code
+    runJson?: string | null;  // Url to the json file containing the run data
+    metrics?: E2eRunMetrics | null;
+}
+
+export interface E2eTestSuite {
+    uuid: string;
+    id: number;
+    name: string;
+    description?: string | null;
+    project: number; // typically an ID
+    host?: number | null;
+    createdBy?: PublicUserInfo | null;
+    completed?: boolean;
+    completedAt?: string | null;
+    tests?: E2eTest[];
+    key: string;
+
+    // Read-only expanded fields
+    feature?: TestFeature | null;
+    testType?: TestType | null;
+    userRole?: UserRole | null;
+    deviceType?: DeviceType | null;
+    region?: Region | null;
+
+    // Writable foreign key fields
+    featureId?: number | null;
+    testTypeId?: number | null;
+    userRoleId?: number | null;
+    deviceTypeId?: number | null;
+    regionId?: number | null;
+
+    timestamp: string;
+    lastMod: string;
+    tunnelKey?: string | null;
+}
+
+// Main E2eTestCommitSuite interface (from E2eTestCommitSuiteSerializer)
+export interface E2eTestCommitSuite {
+    id: number;
+    uuid: string;
+    commitHash: string | null;
+    commitHashShort: string | null; // first 8 characters of commit hash
+    project: number; // project ID
+    projectName: string | null;
+    description: string;
+    summarizedChanges: string | null;
+    tests: E2eTest[];
+    tunnelKey: string | null;  // Actual api key for ngrok
+    key: string | null;  // UUID key for url endpoint
+    runStatus: E2eRunStatus;
+    createdBy: PublicUserInfo | null;
+    timestamp: string;
+    lastMod: string;
+}
+
+// Simplified E2eTestCommitSuite interface (from SimpleE2eTestCommitSuiteSerializer)
+export interface SimpleE2eTestCommitSuite {
+    id: number;
+    uuid: string;
+    commitHash: string | null;
+    commitHashShort: string | null; // first 8 characters of commit hash
+    project: number; // project ID
+    projectName: string | null;
+    summarizedChanges: string | null;
+    tunnelKey: string | null;  // Actual api key for ngrok
+    key: string | null;  // UUID key for url endpoint
+    runStatus: E2eRunStatus;
+    testCount: number; // count of tests in this commit suite
+    createdBy: PublicUserInfo | null;
+    timestamp: string;
+    lastMod: string;
+}
+// Supporting interfaces (adjust fields as necessary)
+export interface TestFeature {
+    id: number;
+    name: string;
+    description?: string;
+}
+
+export interface TestType {
+    id: number;
+    name: string;
+}
+
+export interface UserRole {
+    id: number;
+    name: string;
+}
+
+export interface DeviceType {
+    id: number;
+    name: string;
+}
+
+export interface Region {
+    id: number;
+    name: string;
+}
+
+export interface CommitInfo {
+    hash: string;
+    message: string;
+    author: string;
+    date: string;
+    files: string[];
+    diff: string;
+}
+
+export interface WorkingChange {
+    status: string;
+    file: string;
+    diff?: string;
+}
+
+export interface WorkingChanges {
+    changes: WorkingChange[];
+    branchInfo: {
+        branch: string;
+        commitHash: string;
+    };
+}
+

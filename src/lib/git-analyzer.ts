@@ -399,4 +399,158 @@ export class GitAnalyzer {
 
     return changes;
   }
+
+  /**
+   * Enhanced context analysis inspired by CodebaseAnalyzer patterns
+   * Analyzes changes to provide better insights for test generation
+   */
+  async analyzeChangesWithContext(changes: WorkingChange[]): Promise<{
+    totalFiles: number;
+    fileTypes: Record<string, number>;
+    componentChanges: string[];
+    routingChanges: string[];
+    configChanges: string[];
+    testChanges: string[];
+    affectedLanguages: string[];
+    changeComplexity: 'low' | 'medium' | 'high';
+    suggestedFocusAreas: string[];
+  }> {
+    const analysis = {
+      totalFiles: changes.length,
+      fileTypes: {} as Record<string, number>,
+      componentChanges: [] as string[],
+      routingChanges: [] as string[],
+      configChanges: [] as string[],
+      testChanges: [] as string[],
+      affectedLanguages: [] as string[],
+      changeComplexity: 'low' as 'low' | 'medium' | 'high',
+      suggestedFocusAreas: [] as string[]
+    };
+
+    const languageExtensions = new Set<string>();
+
+    // Analyze each changed file
+    for (const change of changes) {
+      const filePath = change.file.toLowerCase();
+      const extension = path.extname(change.file).toLowerCase();
+      
+      // Track file types
+      analysis.fileTypes[extension] = (analysis.fileTypes[extension] || 0) + 1;
+      
+      // Track languages
+      if (extension) {
+        languageExtensions.add(extension);
+      }
+
+      // Categorize files by purpose (similar to CodebaseAnalyzer patterns)
+      if (this.isComponentFile(filePath)) {
+        analysis.componentChanges.push(change.file);
+      }
+      
+      if (this.isRoutingFile(filePath)) {
+        analysis.routingChanges.push(change.file);
+      }
+      
+      if (this.isConfigFile(filePath)) {
+        analysis.configChanges.push(change.file);
+      }
+      
+      if (this.isTestFile(filePath)) {
+        analysis.testChanges.push(change.file);
+      }
+    }
+
+    // Convert extensions to language names
+    analysis.affectedLanguages = Array.from(languageExtensions).map(ext => 
+      this.getLanguageFromExtension(ext)
+    ).filter(Boolean);
+
+    // Determine complexity based on number and types of changes
+    if (changes.length > 10 || analysis.configChanges.length > 0) {
+      analysis.changeComplexity = 'high';
+    } else if (changes.length > 5 || analysis.componentChanges.length > 3) {
+      analysis.changeComplexity = 'medium';
+    }
+
+    // Suggest focus areas based on changes
+    if (analysis.componentChanges.length > 0) {
+      analysis.suggestedFocusAreas.push('Component rendering and interaction');
+    }
+    if (analysis.routingChanges.length > 0) {
+      analysis.suggestedFocusAreas.push('Navigation and routing behavior');
+    }
+    if (analysis.configChanges.length > 0) {
+      analysis.suggestedFocusAreas.push('Configuration and build processes');
+    }
+    if (analysis.testChanges.length > 0) {
+      analysis.suggestedFocusAreas.push('Test coverage and validation');
+    }
+
+    return analysis;
+  }
+
+  /**
+   * Check if file is a component (similar to CodebaseAnalyzer patterns)
+   */
+  private isComponentFile(filePath: string): boolean {
+    const componentPatterns = [
+      'component', 'components', 'ui', 'views', 'pages', 'widgets'
+    ];
+    return componentPatterns.some(pattern => filePath.includes(pattern)) ||
+           filePath.endsWith('.tsx') || filePath.endsWith('.jsx') || filePath.endsWith('.vue');
+  }
+
+  /**
+   * Check if file is related to routing
+   */
+  private isRoutingFile(filePath: string): boolean {
+    const routingPatterns = [
+      'router', 'routes', 'routing', 'navigation', 'menu', 'layout', '_app'
+    ];
+    return routingPatterns.some(pattern => filePath.includes(pattern));
+  }
+
+  /**
+   * Check if file is a configuration file
+   */
+  private isConfigFile(filePath: string): boolean {
+    const configPatterns = [
+      'package.json', 'tsconfig', 'webpack', 'vite', 'next.config', 
+      'tailwind', '.env', 'babel', 'eslint', 'prettier'
+    ];
+    return configPatterns.some(pattern => filePath.includes(pattern));
+  }
+
+  /**
+   * Check if file is a test file
+   */
+  private isTestFile(filePath: string): boolean {
+    const testPatterns = [
+      'test', 'tests', 'spec', '__tests__', 'cypress', 'playwright', '.test.', '.spec.'
+    ];
+    return testPatterns.some(pattern => filePath.includes(pattern));
+  }
+
+  /**
+   * Get language name from file extension
+   */
+  private getLanguageFromExtension(extension: string): string {
+    const languageMap: Record<string, string> = {
+      '.ts': 'TypeScript',
+      '.tsx': 'TypeScript React', 
+      '.js': 'JavaScript',
+      '.jsx': 'JavaScript React',
+      '.vue': 'Vue',
+      '.py': 'Python',
+      '.rb': 'Ruby',
+      '.java': 'Java',
+      '.cs': 'C#',
+      '.css': 'CSS',
+      '.scss': 'SCSS',
+      '.html': 'HTML',
+      '.json': 'JSON',
+      '.md': 'Markdown'
+    };
+    return languageMap[extension] || extension.replace('.', '').toUpperCase();
+  }
 }
