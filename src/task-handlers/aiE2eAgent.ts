@@ -54,8 +54,8 @@ export class AiE2eAgent {
         this.testObjectType = options.testObjectType;
         this.agentOptions = options;
         this.objectCallbacks = {
-            createObject: this.getClientCreateFunction(this.testObjectType, options.testRunType),
-            pollObject: this.getClientPollFunction(this.testObjectType, options.testRunType),
+            createObject: this.getClientCreateFunction(this.testObjectType),
+            pollObject: this.getClientPollFunction(this.testObjectType),
             parseStatusFromObject: this.parseStatusFromObject(this.testObjectType)
         };
         this.testHandler = null; // Will be set up after service check
@@ -71,7 +71,7 @@ export class AiE2eAgent {
                 port: port,
                 method: 'GET',
                 timeout: 5000, // 5 second timeout
-            }, (response) => {
+            }, () => {
                 // If we get any response, the service is active
                 resolve(true);
             });
@@ -163,7 +163,7 @@ export class AiE2eAgent {
         return this.testHandler?.isTestRunning() ?? false;
     }
 
-    private getClientCreateFunction(testObjectType: TestObjectType, testRunType: TestRunType): (description?: string, params?: Record<string, any>) => Promise<TestObject> {
+    private getClientCreateFunction(testObjectType: TestObjectType): (description?: string, params?: Record<string, any>) => Promise<TestObject> {
         const client = this.client.e2es;
         let func;
         if (!client) {
@@ -230,7 +230,7 @@ export class AiE2eAgent {
         };
     }
 
-    private getClientPollFunction(testObjectType: TestObjectType, testRunType: TestRunType): (uuid: string, params?: Record<string, any>) => Promise<TestObject> {
+    private getClientPollFunction(testObjectType: TestObjectType): (uuid: string, params?: Record<string, any>) => Promise<TestObject> {
         const client = this.client.e2es;
         let func;
         if (!client) {

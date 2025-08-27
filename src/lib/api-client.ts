@@ -157,7 +157,7 @@ export class DebuggAIClient {
    * Handles path normalization and context extraction
    */
   private processCommitTestRequest(request: CommitTestRequest): CommitTestRequest {
-    const { repoPath, repoName, branchName } = request;
+    const { repoPath, repoName } = request;
     
     // Normalize paths and extract relative paths for working changes
     const processedWorkingChanges = request.workingChanges?.map(change => {

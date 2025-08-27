@@ -1,4 +1,8 @@
-let ngrok: any;
+let ngrok: {
+  connect: (options: { proto: string; addr: number; hostname?: string; authtoken: string }) => Promise<string>;
+  disconnect: (url: string) => Promise<void>;
+  kill: () => Promise<void>;
+} | undefined;
 try {
   ngrok = require('ngrok');
 } catch (error) {

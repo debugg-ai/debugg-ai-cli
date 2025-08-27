@@ -30,6 +30,8 @@ module.exports = {
   testPathIgnorePatterns: [
     '/node_modules/',
     '/src/__tests__/mocks/',
-    '/src/__tests__/setup.ts'
+    '/src/__tests__/setup.ts',
+    '/src/__tests__/integration/setup.ts',
+    '/src/__tests__/integration/integration-config.ts'
   ]
 };

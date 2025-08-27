@@ -21,8 +21,8 @@ export interface AxiosResponse<T> {
     config: AxiosRequestConfig;
 }
 
-// Base types for common fields
-interface BaseModel {
+// Base types for common fields - used by backend services
+export interface BaseModel {
     id: number;
     uuid: string;
     timestamp: string; // ISO datetime string

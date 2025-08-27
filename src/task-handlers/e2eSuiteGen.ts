@@ -100,7 +100,7 @@ export class E2eSuiteGenerator {
                 vscode.window.setStatusBarMessage("File not found or not associated with a repo. Please open a file in a repo.", 2000);
                 return;
             }
-            const curFileUri = vscode.Uri.file(filePath);
+            // File URI would be used for future file-specific operations
             this.repoName = repoName;
             this.repoPath = repoPath;
             this.branchName = branchName;
@@ -136,7 +136,7 @@ export class E2eSuiteGenerator {
         };
     }
 
-    async createTestSuite(testDescription: string, localPort?: number): Promise<E2eTestSuite | null> {
+    async createTestSuite(testDescription: string): Promise<E2eTestSuite | null> {
         console.log(`Creating new E2E test suite with description: ${testDescription}`);
         const e2eTestSuite = await this.client.e2es?.createE2eTestSuite(
             testDescription,

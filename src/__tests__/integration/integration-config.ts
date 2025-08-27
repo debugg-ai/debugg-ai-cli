@@ -18,6 +18,7 @@
  * - INTEGRATION_TEST_REPO: Path to test repository (default: current directory)
  * 
  * @jest-environment node
+ * @fileoverview Configuration utilities for integration tests - not a test file
  */
 
 // Import setup to ensure .env is loaded

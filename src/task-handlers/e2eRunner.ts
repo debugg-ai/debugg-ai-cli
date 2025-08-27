@@ -178,7 +178,7 @@ export class E2eTestRunner {
         run.enqueued(testItem);
 
         let stopped = false;
-        let lastStep = 0;
+        const lastStep = 0;
         const formatter = new RunResultFormatter(run);
         vscode.commands.executeCommand('testing.showMostRecentOutput', testItem);
         formatter.updateStep(`Running ${e2eTest.description}`, "pending");

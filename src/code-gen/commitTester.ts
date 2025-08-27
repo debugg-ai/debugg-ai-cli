@@ -131,7 +131,7 @@ export class CommitTester {
 
     let lastModified = fs.statSync(gitLogPath).mtimeMs;
 
-    const watcher = fs.watchFile(gitLogPath, { interval: 1000 }, async (curr, prev) => {
+    const watcher = fs.watchFile(gitLogPath, { interval: 1000 }, async (curr) => {
       if (curr.mtimeMs !== lastModified) {
         lastModified = curr.mtimeMs;
         console.log(`[CommitTester] New commit detected in ${repoPath}`);
@@ -181,7 +181,7 @@ export class CommitTester {
     this.lastCommitHash = null;
 
     // Clean up all file watchers
-    for (const [repoPath, watcher] of this.fileWatchers) {
+    for (const repoPath of this.fileWatchers.keys()) {
       fs.unwatchFile(path.join(repoPath, '.git', 'logs', 'HEAD'));
     }
     this.fileWatchers.clear();
@@ -210,7 +210,7 @@ export class CommitTester {
       );
 
       // Generate tests for the commit
-      const result = await this.generateCommitContext({ hash: newCommitHash, message: commitInfo.message, author: commitInfo.author, date: commitInfo.date, files: commitInfo.files, diff: commitInfo.diff });
+      await this.generateCommitContext({ hash: newCommitHash, message: commitInfo.message, author: commitInfo.author, date: commitInfo.date, files: commitInfo.files, diff: commitInfo.diff });
 
       this.lastCommitHash = newCommitHash;
 
@@ -1075,7 +1075,6 @@ Focus on testing the user-facing functionality that was affected by these change
         const parts = line.trim().split('\t');
         if (parts.length >= 2) {
           const gitStatus = parts[0];
-          const file = parts[1];
           let oldFile: string | undefined;
 
           // Handle renamed files (format: R100    old_file    new_file)
@@ -1120,7 +1119,6 @@ Focus on testing the user-facing functionality that was affected by these change
             // Get diff for added, modified, renamed, or copied files
             try {
               // Compare against parent commit to see what changed
-              const parentCommand = `git show ${commitInfo.hash}^:${finalFile}`;
               const currentCommand = `git show ${commitInfo.hash}:${finalFile}`;
               
               try {
@@ -1144,7 +1142,7 @@ Focus on testing the user-facing functionality that was affected by these change
             // For deleted files, we can get the content that was removed
             try {
               const parentCommand = `git show ${commitInfo.hash}^:${finalFile}`;
-              const [deletedContent] = await this.ide.subprocess(parentCommand, workspaceDirPath);
+              await this.ide.subprocess(parentCommand, workspaceDirPath);
               diff = `--- Deleted file content ---`;  // For now just mark it as deleted
             } catch (error) {
               console.error(`[CommitTester] Error getting deleted file content for ${finalFile}: ${error}`);
