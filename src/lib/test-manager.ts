@@ -1,4 +1,4 @@
-import { DebuggAIClient, E2eTestSuite, CommitTestRequest } from './api-client';
+import { CLIBackendClient } from '../backend/cli/client';
 import { GitAnalyzer, WorkingChanges } from './git-analyzer';
 import * as fs from 'fs-extra';
 import * as path from 'path';
@@ -20,7 +20,7 @@ export interface TestManagerOptions {
 export interface TestResult {
   success: boolean;
   suiteUuid?: string;
-  suite?: E2eTestSuite;
+  suite?: any; // Using any for now since we're working with backend types
   error?: string;
   testFiles?: string[];
 }
@@ -29,7 +29,7 @@ export interface TestResult {
  * Manages the complete test lifecycle from commit analysis to result reporting
  */
 export class TestManager {
-  private client: DebuggAIClient;
+  private client: CLIBackendClient;
   private gitAnalyzer: GitAnalyzer;
   private options: TestManagerOptions;
   private spinner: Ora | null = null;
@@ -42,9 +42,10 @@ export class TestManager {
       ...options
     };
 
-    this.client = new DebuggAIClient({
+    this.client = new CLIBackendClient({
       apiKey: options.apiKey,
       baseUrl: options.baseUrl || 'https://api.debugg.ai',
+      repoPath: options.repoPath,
       timeout: this.options.serverTimeout || 30000
     });
 
@@ -81,33 +82,24 @@ export class TestManager {
         throw new Error('Not a valid git repository');
       }
 
-      // Step 2: Test API connection
-      this.spinner.text = 'Testing API connection...';
-      const connectionTest = await this.client.testConnection();
-      if (!connectionTest.success) {
-        throw new Error(`API connection failed: ${connectionTest.error}`);
-      }
+      // Step 2: Initialize the CLI client (includes connection test)
+      this.spinner.text = 'Initializing backend client...';
+      await this.client.initialize();
 
-      // Step 3: Get current user to validate API key
+      // Step 3: Test authentication
       this.spinner.text = 'Validating API key...';
-      const user = await this.client.getCurrentUser();
-      if (!user) {
-        throw new Error('Failed to authenticate with API key');
+      const authTest = await this.client.testAuthentication();
+      if (!authTest.success) {
+        throw new Error(`Authentication failed: ${authTest.error}`);
       }
 
-      this.spinner.text = `Authenticated as user: ${user.email || user.id}`;
+      this.spinner.text = `Authenticated as user: ${authTest.user?.email || authTest.user?.id}`;
 
-      // Step 4: Validate tunnel URL if provided
+      // Step 4: Validate tunnel URL if provided (simplified for now)
       if (this.options.tunnelUrl) {
-        this.spinner.text = 'Validating tunnel URL...';
-        const validation = await this.client.validateTunnelUrl(this.options.tunnelUrl);
-        
-        if (!validation.accessible) {
-          console.warn(chalk.yellow(`⚠ Tunnel URL validation failed: ${validation.error}`));
-          console.warn(chalk.yellow('Proceeding with tunnel URL anyway...'));
-        } else {
-          this.spinner.text = `Tunnel URL validated (${validation.responseTime}ms response time)`;
-        }
+        this.spinner.text = 'Using tunnel URL...';
+        // Note: Tunnel validation can be added later if needed
+        console.log(`Using tunnel URL: ${this.options.tunnelUrl}`);
       }
 
       // Step 5: Analyze git changes
@@ -129,7 +121,7 @@ export class TestManager {
 
       // Step 7: Submit test request
       this.spinner.text = 'Creating test suite...';
-      const testRequest: CommitTestRequest = {
+      const testRequest: any = {
         repoName: this.gitAnalyzer.getRepoName(),
         repoPath: this.options.repoPath,
         branchName: changes.branchInfo.branch,
@@ -138,13 +130,16 @@ export class TestManager {
         testDescription
       };
 
-      const response = this.options.tunnelUrl 
-        ? await this.client.createCommitTestSuiteWithTunnel(
-            testRequest, 
-            this.options.tunnelUrl, 
-            this.options.tunnelMetadata
-          )
-        : await this.client.createCommitTestSuite(testRequest);
+      if (this.options.tunnelUrl) {
+        testRequest.publicUrl = this.options.tunnelUrl;
+        testRequest.testEnvironment = {
+          url: this.options.tunnelUrl,
+          type: 'ngrok_tunnel' as const,
+          metadata: this.options.tunnelMetadata
+        };
+      }
+
+      const response = await this.client.createCommitTestSuite(testRequest);
       
       if (!response.success || !response.testSuiteUuid) {
         throw new Error(`Failed to create test suite: ${response.error}`);
@@ -154,14 +149,14 @@ export class TestManager {
 
       // Step 8: Wait for tests to complete
       this.spinner.text = 'Waiting for tests to complete...';
-      const completedSuite = await this.client.waitForTestSuiteCompletion(
+      const completedSuite = await this.client.waitForCommitTestSuiteCompletion(
         response.testSuiteUuid,
         {
           maxWaitTime: this.options.maxTestWaitTime || 600000,
           pollInterval: 5000,
           onProgress: (suite) => {
             const testCount = suite.tests?.length || 0;
-            const completedTests = suite.tests?.filter(t => 
+            const completedTests = suite.tests?.filter((t: any) => 
               t.curRun?.status === 'completed' || t.curRun?.status === 'failed'
             ).length || 0;
             
@@ -380,7 +375,7 @@ Test Requirements:
   /**
    * Save test artifacts (scripts, recordings, etc.) to local directory
    */
-  private async saveTestArtifacts(suite: E2eTestSuite): Promise<string[]> {
+  private async saveTestArtifacts(suite: any): Promise<string[]> {
     const savedFiles: string[] = [];
     
     if (!suite.tests || suite.tests.length === 0) {
@@ -450,7 +445,7 @@ Test Requirements:
   /**
    * Report test results to console
    */
-  private reportResults(suite: E2eTestSuite): void {
+  private reportResults(suite: any): void {
     console.log('\n' + chalk.bold('=== Test Results ==='));
     console.log(`Suite: ${suite.name || suite.uuid}`);
     console.log(`Status: ${this.getStatusColor(suite.status || 'unknown')}`);
@@ -466,8 +461,8 @@ Test Requirements:
       }
 
       // Summary
-      const passed = suite.tests.filter(t => t.curRun?.status === 'completed').length;
-      const failed = suite.tests.filter(t => t.curRun?.status === 'failed').length;
+      const passed = suite.tests.filter((t: any) => t.curRun?.status === 'completed').length;
+      const failed = suite.tests.filter((t: any) => t.curRun?.status === 'failed').length;
       const total = suite.tests.length;
 
       console.log('\n' + chalk.bold('Summary:'));

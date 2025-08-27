@@ -53,7 +53,7 @@ describe('TestManager', () => {
       testConnection: jest.fn(),
       getCurrentUser: jest.fn(),
       createCommitTestSuite: jest.fn(),
-      waitForTestSuiteCompletion: jest.fn(),
+      waitForCommitTestSuiteCompletion: jest.fn(),
       downloadArtifact: jest.fn()
     } as any;
     
@@ -139,7 +139,7 @@ describe('TestManager', () => {
         success: true,
         testSuiteUuid: 'suite-123'
       });
-      mockClient.waitForTestSuiteCompletion.mockResolvedValue({
+      mockClient.waitForCommitTestSuiteCompletion.mockResolvedValue({
         uuid: 'suite-123',
         status: 'completed',
         tests: []
@@ -243,7 +243,7 @@ describe('TestManager', () => {
     });
 
     it('should fail if test suite times out', async () => {
-      mockClient.waitForTestSuiteCompletion.mockResolvedValue(null);
+      mockClient.waitForCommitTestSuiteCompletion.mockResolvedValue(null);
 
       const result = await testManager.runCommitTests();
 
@@ -271,7 +271,7 @@ describe('TestManager', () => {
         ]
       };
 
-      mockClient.waitForTestSuiteCompletion.mockImplementation(async (uuid, options) => {
+      mockClient.waitForCommitTestSuiteCompletion.mockImplementation(async (uuid, options) => {
         if (options?.onProgress) {
           options.onProgress(mockSuite as any);
         }
@@ -280,7 +280,7 @@ describe('TestManager', () => {
 
       await testManager.runCommitTests();
 
-      expect(mockClient.waitForTestSuiteCompletion).toHaveBeenCalledWith(
+      expect(mockClient.waitForCommitTestSuiteCompletion).toHaveBeenCalledWith(
         'suite-123',
         expect.objectContaining({
           maxWaitTime: 600000,

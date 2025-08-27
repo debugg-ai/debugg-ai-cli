@@ -151,7 +151,7 @@ describe('DebuggAIClient', () => {
     });
   });
 
-  describe('waitForTestSuiteCompletion', () => {
+  describe('waitForCommitTestSuiteCompletion', () => {
     const suiteUuid = 'suite-123';
 
     it('should wait for completion and return final suite', async () => {
@@ -166,7 +166,7 @@ describe('DebuggAIClient', () => {
         .mockResolvedValueOnce(createMockAxiosResponse({ ...mockSuite, status: 'running' }))
         .mockResolvedValueOnce(createMockAxiosResponse(mockSuite));
 
-      const result = await client.waitForTestSuiteCompletion(suiteUuid, {
+      const result = await client.waitForCommitTestSuiteCompletion(suiteUuid, {
         maxWaitTime: 1000,
         pollInterval: 100
       });
@@ -184,7 +184,7 @@ describe('DebuggAIClient', () => {
 
       mockAxiosInstance.get.mockResolvedValue(createMockAxiosResponse(mockSuite));
 
-      const result = await client.waitForTestSuiteCompletion(suiteUuid, {
+      const result = await client.waitForCommitTestSuiteCompletion(suiteUuid, {
         maxWaitTime: 100,
         pollInterval: 50
       });
@@ -202,7 +202,7 @@ describe('DebuggAIClient', () => {
 
       mockAxiosInstance.get.mockResolvedValue(createMockAxiosResponse(mockSuite));
 
-      await client.waitForTestSuiteCompletion(suiteUuid, {
+      await client.waitForCommitTestSuiteCompletion(suiteUuid, {
         maxWaitTime: 100,
         pollInterval: 50,
         onProgress
@@ -214,7 +214,7 @@ describe('DebuggAIClient', () => {
     it('should return null if suite retrieval fails', async () => {
       mockAxiosInstance.get.mockRejectedValue(createMockAxiosError(404, 'Not Found'));
 
-      const result = await client.waitForTestSuiteCompletion(suiteUuid, {
+      const result = await client.waitForCommitTestSuiteCompletion(suiteUuid, {
         maxWaitTime: 100,
         pollInterval: 50
       });
@@ -232,7 +232,7 @@ describe('DebuggAIClient', () => {
       mockAxiosInstance.get.mockResolvedValue(createMockAxiosResponse(mockSuite));
 
       const startTime = Date.now();
-      const result = await client.waitForTestSuiteCompletion(suiteUuid, {
+      const result = await client.waitForCommitTestSuiteCompletion(suiteUuid, {
         maxWaitTime: 5000,
         pollInterval: 1000
       });
@@ -357,7 +357,7 @@ describe('DebuggAIClient', () => {
 
       const result = await client.testConnection();
 
-      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/api/v1/health');
+      expect(mockAxiosInstance.get).toHaveBeenCalledWith('/health');
       expect(result).toEqual({ success: true });
     });
 

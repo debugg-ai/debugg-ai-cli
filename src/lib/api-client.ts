@@ -42,6 +42,7 @@ export interface CommitTestRequest {
     port?: number | undefined;
     metadata?: Record<string, any> | undefined;
   };
+  timestamp?: string; // Add timestamp field for API compatibility
   // Enhanced: add context similar to backend services
   context?: {
     source: string;
@@ -123,9 +124,7 @@ export class DebuggAIClient {
       const processedRequest = this.processCommitTestRequest(request);
       
       const response = await this.axios.post<CommitTestResponse>('/api/v1/commit-suites/', {
-        ...processedRequest,
-        // Add timestamp for uniqueness
-        timestamp: new Date().toISOString()
+        ...processedRequest
       });
 
       console.log('API Response:', response.data);
@@ -183,14 +182,17 @@ export class DebuggAIClient {
       };
     });
 
+    const timestamp = new Date().toISOString();
+    
     return {
       ...request,
+      timestamp, // Add timestamp at root level for compatibility with tests
       ...(processedWorkingChanges && { workingChanges: processedWorkingChanges }),
       // Add enhanced context similar to backend services
       context: {
         source: 'cli',
         version: '1.0.1',
-        timestamp: new Date().toISOString(),
+        timestamp,
         ...(request.testEnvironment && { 
           environment: request.testEnvironment 
         })
@@ -198,6 +200,18 @@ export class DebuggAIClient {
     };
   }
 
+  /**
+   * Get the status of a commit test suite
+   */
+  async getCommitTestSuiteStatus(suiteUuid: string): Promise<E2eTestSuite | null> {
+    try {
+      const response = await this.axios.get<E2eTestSuite>(`/api/v1/commit-suites/${suiteUuid}/`);
+      return response.data;
+    } catch (error) {
+      console.error(`Failed to get commit test suite status for ${suiteUuid}:`, error);
+      return null;
+    }
+  }
   /**
    * Get the status of a test suite
    */
@@ -214,7 +228,7 @@ export class DebuggAIClient {
   /**
    * Wait for a test suite to complete with polling
    */
-  async waitForTestSuiteCompletion(
+  async waitForCommitTestSuiteCompletion(
     suiteUuid: string,
     options: {
       maxWaitTime?: number; // in milliseconds
@@ -229,7 +243,7 @@ export class DebuggAIClient {
     console.log(`Waiting for test suite ${suiteUuid} to complete...`);
 
     while (Date.now() - startTime < maxWaitTime) {
-      const suite = await this.getTestSuiteStatus(suiteUuid);
+      const suite = await this.getCommitTestSuiteStatus(suiteUuid);
       
       if (!suite) {
         console.error('Failed to get test suite status');
@@ -319,7 +333,7 @@ export class DebuggAIClient {
    */
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {
-      await this.axios.get('/api/v1/health');
+      await this.axios.get('/health');
       return { success: true };
     } catch (error) {
       return {

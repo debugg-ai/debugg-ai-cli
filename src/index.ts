@@ -6,6 +6,7 @@
  */
 
 export { DebuggAIClient } from './lib/api-client';
+export { CLIBackendClient } from './backend/cli/client';
 export { GitAnalyzer } from './lib/git-analyzer';
 export { TestManager } from './lib/test-manager';
 export { TunnelManager } from './lib/tunnel-manager';
@@ -19,6 +20,10 @@ export type {
   CommitTestResponse,
   ApiClientConfig
 } from './lib/api-client';
+
+export type {
+  CLIClientConfig
+} from './backend/cli/client';
 
 // Add missing Chunk interface for backend compatibility
 export interface Chunk {
