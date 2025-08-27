@@ -1,4 +1,9 @@
-import ngrok from 'ngrok';
+let ngrok: any;
+try {
+  ngrok = require('ngrok');
+} catch (error) {
+  console.warn('Warning: ngrok package not available. Tunnel functionality will be disabled.');
+}
 import { v4 as uuidv4 } from 'uuid';
 
 export interface TunnelConfig {
@@ -35,6 +40,10 @@ export class TunnelManager {
   }
 
   async createTunnel(config: TunnelConfig): Promise<TunnelInfo> {
+    if (!ngrok) {
+      throw new Error('Ngrok package is not available. Please install ngrok dependency or use direct URL access instead.');
+    }
+    
     if (!this.authtoken && !config.authtoken) {
       throw new Error('Ngrok auth token is required. Provide via constructor options, config, or NGROK_AUTH_TOKEN env var');
     }
@@ -73,6 +82,11 @@ export class TunnelManager {
   }
 
   async disconnectTunnel(uuid: string): Promise<void> {
+    if (!ngrok) {
+      console.warn('Ngrok package not available, skipping tunnel disconnect');
+      return;
+    }
+    
     const tunnel = this.activeTunnels.get(uuid);
     if (!tunnel) {
       console.warn(`Tunnel with UUID ${uuid} not found`);
@@ -99,11 +113,13 @@ export class TunnelManager {
       }
     }
 
-    try {
-      await ngrok.kill();
-      console.log('All ngrok processes terminated');
-    } catch (error) {
-      console.warn('Failed to kill ngrok processes:', error);
+    if (ngrok) {
+      try {
+        await ngrok.kill();
+        console.log('All ngrok processes terminated');
+      } catch (error) {
+        console.warn('Failed to kill ngrok processes:', error);
+      }
     }
   }
 

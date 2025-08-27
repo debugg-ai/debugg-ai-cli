@@ -40,9 +40,29 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
+    
+    - name: Cache node modules
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
 
     - name: Install dependencies
-      run: npm ci
+      run: |
+        # Configure npm with retry settings for better reliability
+        npm config set fetch-retries 5
+        npm config set fetch-retry-factor 2
+        npm config set fetch-retry-mintimeout 10000
+        npm config set fetch-retry-maxtimeout 60000
+        npm ci
+    
+    - name: Install optional dependencies (with fallback)
+      run: |
+        # Try to install ngrok with timeout and fallback
+        timeout 60 npm install ngrok@5.0.0-beta.2 --optional || echo "Warning: Failed to install ngrok, continuing without tunnel support"
+      continue-on-error: true
 
     - name: Run lint
       run: npm run lint
@@ -76,9 +96,23 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
+    
+    - name: Cache node modules
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+        restore-keys: |
+          ${{ runner.os }}-node-
 
     - name: Install dependencies
-      run: npm ci
+      run: |
+        # Configure npm with retry settings for better reliability
+        npm config set fetch-retries 5
+        npm config set fetch-retry-factor 2
+        npm config set fetch-retry-mintimeout 10000
+        npm config set fetch-retry-maxtimeout 60000
+        npm ci
 
     - name: Build project
       run: npm run build
@@ -129,7 +163,13 @@ jobs:
         cache: 'npm'
         
     - name: Install dependencies
-      run: npm ci
+      run: |
+        # Configure npm with retry settings for better reliability
+        npm config set fetch-retries 5
+        npm config set fetch-retry-factor 2
+        npm config set fetch-retry-mintimeout 10000
+        npm config set fetch-retry-maxtimeout 60000
+        npm ci
 
     - name: Configure git
       run: |
