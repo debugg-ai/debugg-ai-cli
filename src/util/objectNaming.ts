@@ -15,7 +15,7 @@ export function objToSnakeCase(obj: any): any {
   const snakeCaseObj: any = {};
   
   for (const key in obj) {
-    if (obj.hasOwnProperty(key)) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
       const snakeKey = camelToSnakeCase(key);
       const value = obj[key];
       
@@ -47,7 +47,7 @@ export function objToCamelCase(obj: any): any {
   const camelCaseObj: any = {};
   
   for (const key in obj) {
-    if (obj.hasOwnProperty(key)) {
+    if (Object.prototype.hasOwnProperty.call(obj, key)) {
       const camelKey = snakeToCamelCase(key);
       const value = obj[key];
       

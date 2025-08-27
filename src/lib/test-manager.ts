@@ -15,6 +15,11 @@ export interface TestManagerOptions {
   maxTestWaitTime?: number;
   tunnelUrl?: string;
   tunnelMetadata?: Record<string, any> | undefined;
+  // Commit analysis options
+  commit?: string; // Specific commit hash
+  commitRange?: string; // Commit range (e.g., HEAD~3..HEAD)
+  since?: string; // Commits since date/time
+  last?: number; // Last N commits
 }
 
 export interface TestResult {
@@ -231,20 +236,43 @@ export class TestManager {
   }
 
   /**
-   * Analyze git changes (working changes or specific commit)
+   * Analyze git changes (working changes, specific commit, or commit range)
    */
   private async analyzeChanges(): Promise<WorkingChanges> {
-    // In CI/CD, we typically want to analyze the current commit
-    // Check if we have a specific commit hash from environment
-    const commitHash = process.env.GITHUB_SHA;
+    // Priority order: explicit options > environment variables > working changes
     
-    if (commitHash) {
-      // Analyze specific commit (typical for push events)
-      return await this.gitAnalyzer.getCommitChanges(commitHash);
-    } else {
-      // Analyze working changes (for local development)
-      return await this.gitAnalyzer.getWorkingChanges();
+    // 1. Check for explicit commit hash option
+    if (this.options.commit) {
+      return await this.gitAnalyzer.getCommitChanges(this.options.commit);
     }
+    
+    // 2. Check for commit range option
+    if (this.options.commitRange) {
+      const commitHashes = await this.gitAnalyzer.getCommitsFromRange(this.options.commitRange);
+      return await this.gitAnalyzer.getCombinedCommitChanges(commitHashes);
+    }
+    
+    // 3. Check for since date option
+    if (this.options.since) {
+      const commitHashes = await this.gitAnalyzer.getCommitsSince(this.options.since);
+      return await this.gitAnalyzer.getCombinedCommitChanges(commitHashes);
+    }
+    
+    // 4. Check for last N commits option
+    if (this.options.last) {
+      const commitHashes = await this.gitAnalyzer.getLastCommits(this.options.last);
+      return await this.gitAnalyzer.getCombinedCommitChanges(commitHashes);
+    }
+    
+    // 5. In CI/CD, check for environment variable (GitHub Actions)
+    const envCommitHash = process.env.GITHUB_SHA;
+    if (envCommitHash) {
+      // Analyze specific commit (typical for push events)
+      return await this.gitAnalyzer.getCommitChanges(envCommitHash);
+    }
+    
+    // 6. Default: analyze working changes (for local development)
+    return await this.gitAnalyzer.getWorkingChanges();
   }
 
   /**
@@ -258,8 +286,24 @@ export class TestManager {
     // Use enhanced context analysis inspired by backend architecture
     const contextAnalysis = await this.gitAnalyzer.analyzeChangesWithContext(changes.changes);
 
+    // Determine the source of changes for better description
+    let sourceDescription: string;
+    if (this.options.commit) {
+      sourceDescription = `specific commit ${this.options.commit.substring(0, 8)}`;
+    } else if (this.options.commitRange) {
+      sourceDescription = `commit range ${this.options.commitRange}`;
+    } else if (this.options.since) {
+      sourceDescription = `commits since ${this.options.since}`;
+    } else if (this.options.last) {
+      sourceDescription = `last ${this.options.last} commit${this.options.last > 1 ? 's' : ''}`;
+    } else if (process.env.GITHUB_SHA) {
+      sourceDescription = `CI commit ${commitHash.substring(0, 8)}`;
+    } else {
+      sourceDescription = `working changes`;
+    }
+
     // Build focused description based on analysis
-    let description = `Generate comprehensive E2E tests for the changes in commit ${commitHash.substring(0, 8)} on branch ${branch}.
+    let description = `Generate comprehensive E2E tests for the ${sourceDescription} on branch ${branch}.
 
 Change Analysis:
 - Total Files: ${fileCount}

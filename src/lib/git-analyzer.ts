@@ -240,6 +240,106 @@ export class GitAnalyzer {
   }
 
   /**
+   * Get list of commits from a range specification
+   */
+  async getCommitsFromRange(range: string): Promise<string[]> {
+    try {
+      const log = await this.git.log(['--max-count=50', range]);
+      return log.all.map(commit => commit.hash);
+    } catch (error) {
+      console.error(`Failed to get commits from range ${range}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Get commits since a specific date
+   */
+  async getCommitsSince(since: string): Promise<string[]> {
+    try {
+      const log = await this.git.log({
+        since,
+        maxCount: 50 // Reasonable limit
+      });
+      
+      return log.all.map(commit => commit.hash);
+    } catch (error) {
+      console.error(`Failed to get commits since ${since}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Get last N commits
+   */
+  async getLastCommits(count: number): Promise<string[]> {
+    try {
+      const log = await this.git.log({
+        maxCount: Math.min(count, 50) // Cap at 50 to prevent abuse
+      });
+      
+      return log.all.map(commit => commit.hash);
+    } catch (error) {
+      console.error(`Failed to get last ${count} commits:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Combine changes from multiple commits
+   */
+  async getCombinedCommitChanges(commitHashes: string[]): Promise<WorkingChanges> {
+    if (commitHashes.length === 0) {
+      return {
+        changes: [],
+        branchInfo: await this.getCurrentBranchInfo()
+      };
+    }
+
+    if (commitHashes.length === 1 && commitHashes[0]) {
+      return this.getCommitChanges(commitHashes[0]);
+    }
+
+    const branchInfo = await this.getCurrentBranchInfo();
+    const combinedChanges = new Map<string, WorkingChange>();
+
+    // Process commits from oldest to newest to get final state
+    const sortedCommits = [...commitHashes].reverse();
+
+    for (const commitHash of sortedCommits) {
+      const commitChanges = await this.getCommitChanges(commitHash);
+      
+      // Combine changes, with later commits taking precedence
+      for (const change of commitChanges.changes) {
+        const existingChange = combinedChanges.get(change.file);
+        
+        if (!existingChange) {
+          combinedChanges.set(change.file, { ...change });
+        } else {
+          // Merge the changes - combine diffs if both exist
+          const combinedDiff = existingChange.diff && change.diff 
+            ? `${existingChange.diff}\n\n--- Later changes ---\n${change.diff}`
+            : change.diff || existingChange.diff;
+            
+          combinedChanges.set(change.file, {
+            status: change.status, // Use latest status
+            file: change.file,
+            ...(combinedDiff && { diff: combinedDiff })
+          });
+        }
+      }
+    }
+
+    return {
+      changes: Array.from(combinedChanges.values()),
+      branchInfo: {
+        ...branchInfo,
+        commitHash: commitHashes[0] || branchInfo.commitHash // Use most recent commit hash or fallback
+      }
+    };
+  }
+
+  /**
    * Get detailed information about a commit
    */
   async getCommitInfo(commitHash: string): Promise<CommitInfo | null> {

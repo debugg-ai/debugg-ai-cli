@@ -25,6 +25,10 @@ program
   .option('-u, --base-url <url>', 'API base URL (default: https://api.debugg.ai)')
   .option('-r, --repo-path <path>', 'Repository path (default: current directory)')
   .option('-o, --output-dir <dir>', 'Test output directory (default: tests/debugg-ai)')
+  .option('-c, --commit <hash>', 'Specific commit hash to analyze (instead of working changes)')
+  .option('--commit-range <range>', 'Commit range to analyze (e.g., HEAD~3..HEAD, main..feature-branch)')
+  .option('--since <date>', 'Analyze commits since date/time (e.g., "2024-01-01", "2 days ago")')
+  .option('--last <number>', 'Analyze last N commits (e.g., --last 3)')
   .option('--wait-for-server', 'Wait for local development server to be ready')
   .option('--server-port <port>', 'Local server port to wait for (default: 3000)', '3000')
   .option('--server-timeout <ms>', 'Server wait timeout in milliseconds (default: 60000)', '60000')
@@ -73,7 +77,12 @@ program
         baseUrl: options.baseUrl,
         testOutputDir: options.outputDir,
         serverTimeout: parseInt(options.serverTimeout) || 60000,
-        maxTestWaitTime: parseInt(options.maxTestTime) || 600000
+        maxTestWaitTime: parseInt(options.maxTestTime) || 600000,
+        // Commit analysis options
+        commit: options.commit,
+        commitRange: options.commitRange,
+        since: options.since,
+        ...(options.last && { last: parseInt(options.last) })
       });
 
       // Wait for server if requested
