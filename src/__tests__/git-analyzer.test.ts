@@ -520,9 +520,47 @@ describe('GitAnalyzer', () => {
   });
 
   describe('getRepoName', () => {
-    it('should return repository name from path', () => {
+    it('should return repository name from path when remote is not available', () => {
+      // Mock execSync to throw an error (no remote configured)
+      const mockExecSync = jest.spyOn(require('child_process'), 'execSync');
+      mockExecSync.mockImplementation(() => {
+        throw new Error('No remote configured');
+      });
+
       const result = analyzer.getRepoName();
       expect(result).toBe('repo');
+      
+      mockExecSync.mockRestore();
+    });
+
+    it('should return owner/repo format from GitHub HTTPS URL', () => {
+      const mockExecSync = jest.spyOn(require('child_process'), 'execSync');
+      mockExecSync.mockReturnValue('https://github.com/owner/test-repo.git\n');
+
+      const result = analyzer.getRepoName();
+      expect(result).toBe('owner/test-repo');
+      
+      mockExecSync.mockRestore();
+    });
+
+    it('should return owner/repo format from GitHub SSH URL', () => {
+      const mockExecSync = jest.spyOn(require('child_process'), 'execSync');
+      mockExecSync.mockReturnValue('git@github.com:owner/test-repo.git\n');
+
+      const result = analyzer.getRepoName();
+      expect(result).toBe('owner/test-repo');
+      
+      mockExecSync.mockRestore();
+    });
+
+    it('should fallback to directory name for non-GitHub URLs', () => {
+      const mockExecSync = jest.spyOn(require('child_process'), 'execSync');
+      mockExecSync.mockReturnValue('https://gitlab.com/owner/test-repo.git\n');
+
+      const result = analyzer.getRepoName();
+      expect(result).toBe('repo');
+      
+      mockExecSync.mockRestore();
     });
   });
 

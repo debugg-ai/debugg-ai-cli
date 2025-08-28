@@ -1,11 +1,11 @@
 import { TestManager, TestManagerOptions } from '../lib/test-manager';
-import { DebuggAIClient } from '../lib/api-client';
+import { CLIBackendClient } from '../backend/cli/client';
 import { GitAnalyzer } from '../lib/git-analyzer';
 import * as fs from 'fs-extra';
 import { mockFsExtra, setupMockFileSystem } from './mocks/fs-extra';
 
 // Mock dependencies
-jest.mock('../lib/api-client');
+jest.mock('../backend/cli/client');
 jest.mock('../lib/git-analyzer');
 jest.mock('fs-extra');
 jest.mock('ora', () => {
@@ -20,13 +20,13 @@ jest.mock('ora', () => {
 // Mock global fetch for server waiting
 global.fetch = jest.fn();
 
-const MockedDebuggAIClient = DebuggAIClient as jest.MockedClass<typeof DebuggAIClient>;
+const MockedCLIBackendClient = CLIBackendClient as jest.MockedClass<typeof CLIBackendClient>;
 const MockedGitAnalyzer = GitAnalyzer as jest.MockedClass<typeof GitAnalyzer>;
 const mockedFs = fs as jest.Mocked<typeof fs>;
 
 describe('TestManager', () => {
   let testManager: TestManager;
-  let mockClient: jest.Mocked<DebuggAIClient>;
+  let mockClient: jest.Mocked<CLIBackendClient>;
   let mockGitAnalyzer: jest.Mocked<GitAnalyzer>;
   
   const defaultOptions: TestManagerOptions = {
@@ -50,14 +50,14 @@ describe('TestManager', () => {
 
     // Setup client mock
     mockClient = {
-      testConnection: jest.fn(),
-      getCurrentUser: jest.fn(),
+      initialize: jest.fn(),
+      testAuthentication: jest.fn(),
       createCommitTestSuite: jest.fn(),
       waitForCommitTestSuiteCompletion: jest.fn(),
       downloadArtifact: jest.fn()
     } as any;
     
-    MockedDebuggAIClient.mockImplementation(() => mockClient);
+    MockedCLIBackendClient.mockImplementation(() => mockClient);
 
     // Setup git analyzer mock
     mockGitAnalyzer = {
@@ -65,6 +65,10 @@ describe('TestManager', () => {
       getCurrentBranchInfo: jest.fn(),
       getWorkingChanges: jest.fn(),
       getCommitChanges: jest.fn(),
+      getCommitsFromRange: jest.fn(),
+      getCommitsSince: jest.fn(),
+      getLastCommits: jest.fn(),
+      getCombinedCommitChanges: jest.fn(),
       getRepoName: jest.fn(),
       analyzeChangesWithContext: jest.fn()
     } as any;
@@ -76,9 +80,10 @@ describe('TestManager', () => {
 
   describe('constructor', () => {
     it('should initialize with default options', () => {
-      expect(MockedDebuggAIClient).toHaveBeenCalledWith({
+      expect(MockedCLIBackendClient).toHaveBeenCalledWith({
         apiKey: defaultOptions.apiKey,
         baseUrl: defaultOptions.baseUrl,
+        repoPath: defaultOptions.repoPath,
         timeout: 30000
       });
 
@@ -97,9 +102,10 @@ describe('TestManager', () => {
 
       new TestManager(customOptions);
 
-      expect(MockedDebuggAIClient).toHaveBeenCalledWith({
+      expect(MockedCLIBackendClient).toHaveBeenCalledWith({
         apiKey: 'custom-key',
         baseUrl: 'https://api.debugg.ai',
+        repoPath: '/custom/path',
         timeout: 60000
       });
     });
@@ -109,8 +115,8 @@ describe('TestManager', () => {
     beforeEach(() => {
       // Setup default successful responses
       mockGitAnalyzer.validateGitRepo.mockResolvedValue(true);
-      mockClient.testConnection.mockResolvedValue({ success: true });
-      mockClient.getCurrentUser.mockResolvedValue({ id: 'user-123', email: 'test@example.com' });
+      mockClient.initialize.mockResolvedValue();
+      mockClient.testAuthentication.mockResolvedValue({ success: true, user: { id: 'user-123', email: 'test@example.com' } });
       mockGitAnalyzer.getWorkingChanges.mockResolvedValue({
         changes: [
           { status: 'M', file: 'src/test.ts', diff: 'test diff' }
@@ -152,8 +158,8 @@ describe('TestManager', () => {
       expect(result.success).toBe(true);
       expect(result.suiteUuid).toBe('suite-123');
       expect(mockGitAnalyzer.validateGitRepo).toHaveBeenCalled();
-      expect(mockClient.testConnection).toHaveBeenCalled();
-      expect(mockClient.getCurrentUser).toHaveBeenCalled();
+      expect(mockClient.initialize).toHaveBeenCalled();
+      expect(mockClient.testAuthentication).toHaveBeenCalled();
     });
 
     it('should fail if not a valid git repository', async () => {
@@ -166,24 +172,21 @@ describe('TestManager', () => {
     });
 
     it('should fail if API connection test fails', async () => {
-      mockClient.testConnection.mockResolvedValue({ 
-        success: false, 
-        error: 'Connection failed' 
-      });
+      mockClient.initialize.mockRejectedValue(new Error('Connection failed'));
 
       const result = await testManager.runCommitTests();
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('API connection failed: Connection failed');
+      expect(result.error).toContain('Connection failed');
     });
 
     it('should fail if API key validation fails', async () => {
-      mockClient.getCurrentUser.mockResolvedValue(null);
+      mockClient.testAuthentication.mockResolvedValue({ success: false, error: 'Invalid API key' });
 
       const result = await testManager.runCommitTests();
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('Failed to authenticate with API key');
+      expect(result.error).toBe('Authentication failed: Invalid API key');
     });
 
     it('should skip test generation when no changes detected', async () => {
@@ -502,7 +505,7 @@ describe('TestManager', () => {
 
       const description = await (testManager as any).createTestDescription(mockChanges);
 
-      expect(description).toContain('abcd1234');
+      expect(description).toContain('working changes');
       expect(description).toContain('feature/new-feature');
       expect(description).toContain('Component logic');
       expect(description).toContain('Styling');

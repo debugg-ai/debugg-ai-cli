@@ -153,7 +153,8 @@ export class CLIBackendClient {
             metadata?: Record<string, any>;
         };
         context?: Record<string, any>;
-    }): Promise<{ success: boolean; testSuiteUuid?: string; error?: string }> {
+        key?: string; // Tunnel UUID for custom endpoints (e.g., <uuid>.debugg.ai)
+    }): Promise<{ success: boolean; testSuiteUuid?: string; tunnelKey?: string; error?: string }> {
         try {
             await this.ensureInitialized();
             
@@ -168,13 +169,15 @@ export class CLIBackendClient {
                 workingChanges: request.workingChanges,
                 publicUrl: request.publicUrl,
                 testEnvironment: request.testEnvironment,
+                key: request.key, // Tunnel UUID for custom endpoints
                 ...request.context
             });
 
             if (commitSuite?.uuid) {
                 return {
                     success: true,
-                    testSuiteUuid: commitSuite.uuid
+                    testSuiteUuid: commitSuite.uuid,
+                    tunnelKey: (commitSuite as any).tunnelKey // Backend provides tunnel key for ngrok setup
                 };
             } else {
                 return {

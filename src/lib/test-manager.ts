@@ -1,5 +1,6 @@
 import { CLIBackendClient } from '../backend/cli/client';
 import { GitAnalyzer, WorkingChanges } from './git-analyzer';
+import { TunnelManager, TunnelInfo } from './tunnel-manager';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import chalk from 'chalk';
@@ -20,6 +21,10 @@ export interface TestManagerOptions {
   commitRange?: string; // Commit range (e.g., HEAD~3..HEAD)
   since?: string; // Commits since date/time
   last?: number; // Last N commits
+  // Tunnel configuration
+  tunnelKey?: string; // UUID for custom endpoints (e.g., <uuid>.debugg.ai) - passed as 'key' to backend
+  createTunnel?: boolean; // Whether to create an ngrok tunnel after getting tunnelKey from backend
+  tunnelPort?: number; // Port to tunnel (defaults to 3000)
 }
 
 export interface TestResult {
@@ -28,6 +33,8 @@ export interface TestResult {
   suite?: any; // Using any for now since we're working with backend types
   error?: string;
   testFiles?: string[];
+  tunnelKey?: string; // TunnelKey returned from backend for ngrok setup
+  tunnelInfo?: TunnelInfo; // Tunnel information if tunnel was created
 }
 
 /**
@@ -36,6 +43,7 @@ export interface TestResult {
 export class TestManager {
   private client: CLIBackendClient;
   private gitAnalyzer: GitAnalyzer;
+  private tunnelManager?: TunnelManager;
   private options: TestManagerOptions;
   private spinner: Ora | null = null;
 
@@ -57,6 +65,13 @@ export class TestManager {
     this.gitAnalyzer = new GitAnalyzer({
       repoPath: options.repoPath
     });
+
+    // Initialize tunnel manager if tunnel creation is requested
+    if (this.options.createTunnel) {
+      this.tunnelManager = new TunnelManager({
+        baseDomain: 'ngrok.debugg.ai'
+      });
+    }
   }
 
   /**
@@ -71,6 +86,23 @@ export class TestManager {
       ...options,
       tunnelUrl,
       tunnelMetadata
+    });
+  }
+
+  /**
+   * Create TestManager that will create an ngrok tunnel after backend provides tunnelKey
+   * This is the correct flow: Backend creates commit suite -> provides tunnelKey -> create tunnel
+   */
+  static withAutoTunnel(
+    options: TestManagerOptions,
+    endpointUuid: string,
+    tunnelPort: number = 3000
+  ): TestManager {
+    return new TestManager({
+      ...options,
+      tunnelKey: endpointUuid,
+      createTunnel: true,
+      tunnelPort
     });
   }
 
@@ -135,6 +167,12 @@ export class TestManager {
         testDescription
       };
 
+      // Add tunnel key (UUID) for custom endpoints (e.g., <uuid>.debugg.ai)
+      // This tells the backend which subdomain to expect the tunnel on
+      if (this.options.tunnelKey) {
+        testRequest.key = this.options.tunnelKey;
+      }
+
       if (this.options.tunnelUrl) {
         testRequest.publicUrl = this.options.tunnelUrl;
         testRequest.testEnvironment = {
@@ -151,6 +189,32 @@ export class TestManager {
       }
 
       this.spinner.text = `Test suite created: ${response.testSuiteUuid}`;
+
+      // Step 7.5: Create tunnel if requested and backend provided tunnelKey
+      let tunnelInfo: TunnelInfo | undefined;
+      if (this.options.createTunnel && response.tunnelKey && this.options.tunnelKey) {
+        this.spinner.text = 'Creating ngrok tunnel...';
+        
+        if (!this.tunnelManager) {
+          throw new Error('Tunnel manager not initialized. This should not happen.');
+        }
+
+        const tunnelPort = this.options.tunnelPort || 3000;
+        
+        try {
+          tunnelInfo = await this.tunnelManager.createTunnelWithBackendKey(
+            tunnelPort,
+            this.options.tunnelKey, // UUID for endpoint
+            response.tunnelKey       // ngrok auth token from backend
+          );
+          
+          this.spinner.text = `Tunnel created: ${tunnelInfo.url} -> localhost:${tunnelPort}`;
+          console.log(`✓ Tunnel ready: ${tunnelInfo.url}`);
+        } catch (error) {
+          console.warn(`⚠ Failed to create tunnel: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          console.log('Tests will proceed without tunnel - ensure your server is accessible at the expected URL');
+        }
+      }
 
       // Step 8: Wait for tests to complete
       this.spinner.text = 'Waiting for tests to complete...';
@@ -183,12 +247,23 @@ export class TestManager {
 
       this.spinner.succeed(`Tests completed successfully! Generated ${testFiles.length} test files`);
 
-      return {
+      const result: TestResult = {
         success: true,
         suiteUuid: response.testSuiteUuid,
         suite: completedSuite,
         testFiles
       };
+
+      // Add optional fields only if they have values
+      if (response.tunnelKey) {
+        result.tunnelKey = response.tunnelKey;
+      }
+
+      if (tunnelInfo) {
+        result.tunnelInfo = tunnelInfo;
+      }
+
+      return result;
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -199,6 +274,16 @@ export class TestManager {
         error: errorMsg
       };
     } finally {
+      // Cleanup tunnel if it was created
+      if (this.tunnelManager) {
+        try {
+          await this.tunnelManager.disconnectAll();
+          console.log('✓ Tunnels cleaned up');
+        } catch (error) {
+          console.warn('⚠ Failed to cleanup tunnels:', error);
+        }
+      }
+      
       this.spinner = null;
     }
   }

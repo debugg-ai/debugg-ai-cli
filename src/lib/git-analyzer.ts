@@ -1,6 +1,7 @@
 import { SimpleGit, simpleGit } from 'simple-git';
 import * as path from 'path';
 import * as fs from 'fs-extra';
+import { execSync } from 'child_process';
 
 export interface WorkingChange {
   status: string;
@@ -395,10 +396,73 @@ export class GitAnalyzer {
   }
 
   /**
-   * Get repository name from the directory
+   * Get repository name in GitHub format (owner/repo)
+   * Falls back to directory name if remote is not available
    */
   getRepoName(): string {
+    try {
+      // Try to get the repo name from git remotes
+      const remoteUrl = this.getRemoteUrl();
+      if (remoteUrl) {
+        const repoName = this.extractRepoNameFromUrl(remoteUrl);
+        if (repoName) {
+          return repoName;
+        }
+      }
+    } catch (error) {
+      console.warn('Failed to get repo name from git remote:', error);
+    }
+    
+    // Fallback to directory name
     return path.basename(this.repoPath);
+  }
+
+  /**
+   * Get the remote URL for origin
+   */
+  private getRemoteUrl(): string | null {
+    try {
+      // Use git config to get remote origin URL
+      const result = execSync(
+        'git config --get remote.origin.url',
+        { cwd: this.repoPath, encoding: 'utf8' }
+      );
+      return result.toString().trim();
+    } catch (error) {
+      return null;
+    }
+  }
+
+  /**
+   * Extract owner/repo from various git URL formats
+   */
+  private extractRepoNameFromUrl(url: string): string | null {
+    try {
+      // Remove .git suffix if present
+      const cleanUrl = url.replace(/\.git$/, '');
+      
+      // Handle GitHub HTTPS URLs: https://github.com/owner/repo
+      const httpsMatch = cleanUrl.match(/https:\/\/github\.com\/([^/]+\/[^/]+)/);
+      if (httpsMatch && httpsMatch[1]) {
+        return httpsMatch[1];
+      }
+      
+      // Handle GitHub SSH URLs: git@github.com:owner/repo
+      const sshMatch = cleanUrl.match(/git@github\.com:([^/]+\/[^/]+)/);
+      if (sshMatch && sshMatch[1]) {
+        return sshMatch[1];
+      }
+      
+      // Handle other SSH formats: ssh://git@github.com/owner/repo
+      const sshAltMatch = cleanUrl.match(/ssh:\/\/git@github\.com\/([^/]+\/[^/]+)/);
+      if (sshAltMatch && sshAltMatch[1]) {
+        return sshAltMatch[1];
+      }
+      
+      return null;
+    } catch (error) {
+      return null;
+    }
   }
 
   /**

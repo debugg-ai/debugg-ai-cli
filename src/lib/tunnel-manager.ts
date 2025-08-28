@@ -15,6 +15,8 @@ export interface TunnelConfig {
   subdomain?: string | undefined;
   customDomain?: string | undefined;
   authtoken?: string | undefined;
+  tunnelKey?: string | undefined; // NgrokAuthToken from backend response for ngrok setup
+  endpointUuid?: string | undefined; // UUID for custom endpoint (e.g., <uuid>.debugg.ai)
 }
 
 export interface TunnelInfo {
@@ -48,20 +50,18 @@ export class TunnelManager {
       throw new Error('Ngrok package is not available. Please install ngrok dependency or use direct URL access instead.');
     }
     
-    if (!this.authtoken && !config.authtoken) {
-      throw new Error('Ngrok auth token is required. Provide via constructor options, config, or NGROK_AUTH_TOKEN env var');
+    // Use tunnelKey from backend if provided, otherwise fallback to configured auth token
+    const authToken = config.tunnelKey || config.authtoken || this.authtoken;
+    if (!authToken) {
+      throw new Error('Ngrok auth token or tunnelKey is required. Provide via constructor options, config, tunnelKey from backend, or NGROK_AUTH_TOKEN env var');
     }
 
-    const tunnelUuid = uuidv4();
+    // Use endpointUuid if provided, otherwise generate one
+    const tunnelUuid = config.endpointUuid || uuidv4();
     const subdomain = config.subdomain || tunnelUuid;
     const customDomain = config.customDomain || `${subdomain}.${this.baseDomain}`;
 
     try {
-      const authToken = config.authtoken || this.authtoken;
-      if (!authToken) {
-        throw new Error('Ngrok auth token is required');
-      }
-
       const url = await ngrok.connect({
         proto: 'http',
         addr: config.port,
@@ -173,5 +173,22 @@ export class TunnelManager {
         port: tunnel.port
       };
     }
+  }
+
+  /**
+   * Create tunnel using backend-provided tunnelKey (ngrok auth token) and endpoint UUID
+   * This should be called AFTER creating the commit suite, using the tunnelKey from backend response
+   */
+  async createTunnelWithBackendKey(
+    port: number,
+    endpointUuid: string,
+    tunnelKey: string
+  ): Promise<TunnelInfo> {
+    return this.createTunnel({
+      port,
+      endpointUuid,
+      tunnelKey,
+      customDomain: `${endpointUuid}.${this.baseDomain}`
+    });
   }
 }
