@@ -36,6 +36,7 @@ program
   .option('--max-test-time <ms>', 'Maximum test wait time in milliseconds (default: 600000)', '600000')
   .option('--tunnel-uuid <uuid>', 'Create ngrok tunnel with custom UUID endpoint (e.g., <uuid>.debugg.ai)')
   .option('--tunnel-port <port>', 'Port to tunnel (default: 3000)', '3000')
+  .option('--download-artifacts', 'Download test artifacts (scripts, recordings, JSON results) to local filesystem')
   .option('-v, --verbose', 'Enable verbose logging for debugging')
   .option('--dev', 'Enable development logging (shows all technical details, tunnel info, API calls, git details, timing)')
   .option('--no-color', 'Disable colored output')
@@ -112,6 +113,7 @@ program
           ...(options.outputDir && { testOutputDir: options.outputDir }),
           serverTimeout: parseInt(options.serverTimeout) || 60000,
           maxTestWaitTime: parseInt(options.maxTestTime) || 600000,
+          downloadArtifacts: options.downloadArtifacts || false,
           tunnelKey, // Pass the generated tunnel key
           // Commit analysis options
           commit: options.commit,
@@ -128,6 +130,7 @@ program
           ...(options.outputDir && { testOutputDir: options.outputDir }),
           serverTimeout: parseInt(options.serverTimeout) || 60000,
           maxTestWaitTime: parseInt(options.maxTestTime) || 600000,
+          downloadArtifacts: options.downloadArtifacts || false,
           tunnelKey, // Pass the generated tunnel key
           createTunnel: true, // Enable tunnel creation
           tunnelPort: parseInt(options.serverPort) || 3000, // Use server port for tunnel
@@ -371,6 +374,7 @@ program
   .option('--server-timeout <ms>', 'Server startup timeout in milliseconds (default: 60000)', '60000')
   .option('--cleanup-on-success', 'Cleanup resources after successful completion (default: true)', true)
   .option('--cleanup-on-error', 'Cleanup resources after errors (default: true)', true)
+  .option('--download-artifacts', 'Download test artifacts (scripts, recordings, JSON results) to local filesystem')
   .option('--verbose', 'Verbose logging')
   .option('--dev', 'Enable development logging (shows all technical details, server logs, tunnel info)')
   .option('--no-color', 'Disable colored output')
@@ -473,6 +477,7 @@ program
           repoPath,
           testOutputDir: options.outputDir,
           maxTestWaitTime: parseInt(options.maxTestTime),
+          downloadArtifacts: options.downloadArtifacts || false,
           tunnelKey, // Add the generated tunnel key
           createTunnel: true, // Enable tunnel creation
           tunnelPort: parseInt(options.port) || 3000 // Use server port for tunnel

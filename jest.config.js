@@ -32,6 +32,7 @@ module.exports = {
     '/src/__tests__/mocks/',
     '/src/__tests__/setup.ts',
     '/src/__tests__/integration/setup.ts',
-    '/src/__tests__/integration/integration-config.ts'
+    '/src/__tests__/integration/integration-config.ts',
+    '/src/__tests__/integration/port-utils.ts'
   ]
 };

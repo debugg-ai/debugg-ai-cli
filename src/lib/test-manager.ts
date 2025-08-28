@@ -16,6 +16,7 @@ export interface TestManagerOptions {
   maxTestWaitTime?: number;
   tunnelUrl?: string;
   tunnelMetadata?: Record<string, any> | undefined;
+  downloadArtifacts?: boolean; // Whether to download test artifacts (scripts, recordings, etc.) - defaults to false
   // Commit analysis options
   commit?: string; // Specific commit hash
   commitRange?: string; // Commit range (e.g., HEAD~3..HEAD)
@@ -51,6 +52,7 @@ export class TestManager {
       testOutputDir: 'tests/debugg-ai',
       serverTimeout: 30000, // 30 seconds
       maxTestWaitTime: 600000, // 10 minutes
+      downloadArtifacts: false, // Default to NOT downloading artifacts for CI/CD environments
       ...options
     };
 
@@ -261,14 +263,23 @@ export class TestManager {
         throw new Error('Test suite timed out or failed to complete');
       }
 
-      // Step 9: Download and save test artifacts
-      systemLogger.info('Downloading test artifacts', { category: 'test' });
-      const testFiles = await this.saveTestArtifacts(completedSuite);
+      // Step 9: Download and save test artifacts (only if enabled)
+      let testFiles: string[] = [];
+      if (this.options.downloadArtifacts) {
+        systemLogger.info('Downloading test artifacts', { category: 'test' });
+        testFiles = await this.saveTestArtifacts(completedSuite);
+      } else {
+        systemLogger.debug('Skipping artifact download - downloadArtifacts is disabled', { category: 'test' });
+      }
 
       // Step 10: Report results
       this.reportResults(completedSuite);
 
-      systemLogger.success(`Tests completed successfully! Generated ${testFiles.length} test files`);
+      if (this.options.downloadArtifacts) {
+        systemLogger.success(`Tests completed successfully! Generated ${testFiles.length} test files`);
+      } else {
+        systemLogger.success('Tests completed successfully! (artifacts not downloaded - use --download-artifacts to save test files)');
+      }
 
       const result: TestResult = {
         success: true,

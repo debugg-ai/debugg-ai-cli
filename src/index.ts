@@ -91,6 +91,7 @@ export async function runDebuggAITests(options: {
   waitForServer?: boolean;
   serverPort?: number;
   maxTestWaitTime?: number;
+  downloadArtifacts?: boolean;
 }): Promise<{
   success: boolean;
   suiteUuid?: string;
@@ -104,7 +105,8 @@ export async function runDebuggAITests(options: {
     repoPath: options.repoPath || process.cwd(),
     baseUrl: options.baseUrl || 'https://api.debugg.ai',
     testOutputDir: options.testOutputDir || 'tests/debugg-ai',
-    maxTestWaitTime: options.maxTestWaitTime || 600000
+    maxTestWaitTime: options.maxTestWaitTime || 600000,
+    downloadArtifacts: options.downloadArtifacts || false
   });
 
   // Wait for server if requested
@@ -155,6 +157,7 @@ export async function runWorkflow(options: {
   repoPath?: string;
   baseUrl?: string;
   testOutputDir?: string;
+  downloadArtifacts?: boolean;
   serverCommand?: string;
   serverArgs?: string[];
   serverPort?: number;
@@ -201,7 +204,8 @@ export async function runWorkflow(options: {
       baseUrl: options.baseUrl || DEFAULT_CONFIG.BASE_URL,
       repoPath: options.repoPath || process.cwd(),
       testOutputDir: options.testOutputDir || DEFAULT_CONFIG.TEST_OUTPUT_DIR,
-      maxTestWaitTime: options.maxTestWaitTime || DEFAULT_CONFIG.MAX_TEST_WAIT_TIME
+      maxTestWaitTime: options.maxTestWaitTime || DEFAULT_CONFIG.MAX_TEST_WAIT_TIME,
+      downloadArtifacts: options.downloadArtifacts || false
     },
     cleanup: {
       onSuccess: options.cleanup !== false,
