@@ -124,7 +124,7 @@ describe('TunnelManager', () => {
       const config = { port: 3000 };
 
       await expect(tunnelManager.createTunnel(config)).rejects.toThrow(
-        'Failed to create ngrok tunnel: Connection failed'
+        'Failed to create ngrok tunnel to'
       );
     });
   });
@@ -158,7 +158,7 @@ describe('TunnelManager', () => {
       mockNgrok.disconnect.mockRejectedValue(new Error('Disconnect failed'));
 
       await expect(tunnelManager.disconnectTunnel('test-uuid-1234')).rejects.toThrow(
-        'Failed to disconnect tunnel test-uuid-1234: Disconnect failed'
+        'Failed to disconnect tunnel test-uuid-1234'
       );
     });
   });

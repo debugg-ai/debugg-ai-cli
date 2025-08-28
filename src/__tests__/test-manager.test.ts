@@ -355,19 +355,20 @@ describe('TestManager', () => {
         ]
       };
 
-      mockClient.downloadArtifact
-        .mockResolvedValueOnce(Buffer.from('script content'))
-        .mockResolvedValueOnce(Buffer.from('gif content'))
-        .mockResolvedValueOnce(Buffer.from('json content'));
+      mockClient.downloadArtifactToFile = jest.fn()
+        .mockResolvedValueOnce(true)  // script download success
+        .mockResolvedValueOnce(true)  // gif download success
+        .mockResolvedValueOnce(true); // json download success
 
       const result = await (testManager as any).saveTestArtifacts(mockSuite);
 
       expect(mockedFs.ensureDir).toHaveBeenCalledWith('/test/repo/tests/debugg-ai');
       expect(mockedFs.ensureDir).toHaveBeenCalledWith('/test/repo/tests/debugg-ai/Test One');
       
-      expect(mockedFs.writeFile).toHaveBeenCalledWith(
+      expect(mockClient.downloadArtifactToFile).toHaveBeenCalledWith(
+        'https://example.com/script.js',
         '/test/repo/tests/debugg-ai/Test One/Test One.spec.js',
-        Buffer.from('script content')
+        'http://localhost:3000'
       );
       
       expect(result).toHaveLength(3);

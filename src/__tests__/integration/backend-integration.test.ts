@@ -1,8 +1,8 @@
 // Integration test for CLI backend services against real API
 import { CLIBackendClient } from '../../backend/cli/client';
-import { getIntegrationConfig } from './integration-config';
+import { getIntegrationConfig, describeBackend } from './integration-config';
 
-describe('CLI Backend Integration', () => {
+describeBackend('CLI Backend Integration', () => {
   let client: CLIBackendClient;
   let config: any;
 

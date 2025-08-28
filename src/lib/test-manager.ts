@@ -148,10 +148,6 @@ export class TestManager {
           success: true,
           testFiles: []
         };
-        return {
-          success: true,
-          testFiles: []
-        };
       }
 
       systemLogger.info(`Found ${changes.changes.length} changed files`, { category: 'git' });

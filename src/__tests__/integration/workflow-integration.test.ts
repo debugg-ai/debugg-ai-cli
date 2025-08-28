@@ -8,6 +8,7 @@
 import { WorkflowOrchestrator } from '../../lib/workflow-orchestrator';
 import { TestManager } from '../../lib/test-manager';
 import { describeIntegration, itIntegration, getIntegrationConfig } from './integration-config';
+import { findAvailablePort, waitForPortRelease } from './port-utils';
 import * as http from 'http';
 import * as path from 'path';
 
@@ -100,8 +101,8 @@ describeIntegration('End-to-End Workflow Integration', () => {
       return;
     }
 
-    // Start a test server
-    const testPort = config.testPort + 10; // Use different port to avoid conflicts
+    // Start a test server with dynamic port allocation
+    const testPort = await findAvailablePort(config.testPort + 50);
     let localTestServer: http.Server | null = null;
     
     try {
@@ -161,13 +162,21 @@ describeIntegration('End-to-End Workflow Integration', () => {
         // Don't fail the test - integration environment might not support full workflow
       }
     } finally {
-      // Always cleanup server
+      // Always cleanup server and wait for port to be released
       if (localTestServer) {
         await new Promise<void>((resolve) => {
           localTestServer!.close(() => {
-            resolve();
+            // Give extra time for cleanup
+            setTimeout(resolve, 100);
           });
         });
+        
+        // Wait for port to be properly released
+        try {
+          await waitForPortRelease(testPort, 5);
+        } catch (error) {
+          console.warn(`Port ${testPort} may still be in use:`, error);
+        }
       }
     }
   }, 180000); // 3 minute timeout for full workflow
@@ -177,7 +186,8 @@ describeIntegration('End-to-End Workflow Integration', () => {
       return;
     }
 
-    const testPort = config.testPort + 11;
+    // Find an available port dynamically to avoid conflicts
+    const testPort = await findAvailablePort(config.testPort + 100);
     let localTestServer: http.Server | null = null;
     
     try {
@@ -232,13 +242,21 @@ describeIntegration('End-to-End Workflow Integration', () => {
         console.log('ℹ️ Workflow connectivity verification failed (expected in some environments):', result.error);
       }
     } finally {
-      // Always cleanup server
+      // Always cleanup server and wait for port to be released
       if (localTestServer) {
         await new Promise<void>((resolve) => {
           localTestServer!.close(() => {
-            resolve();
+            // Give extra time for cleanup
+            setTimeout(resolve, 100);
           });
         });
+        
+        // Wait for port to be properly released
+        try {
+          await waitForPortRelease(testPort, 5);
+        } catch (error) {
+          console.warn(`Port ${testPort} may still be in use:`, error);
+        }
       }
     }
   }, 180000);
@@ -274,16 +292,19 @@ describeIntegration('End-to-End Workflow Integration', () => {
       return;
     }
 
+    // Use dynamic port allocation
+    const testPort = await findAvailablePort(config.testPort + 120);
+
     const workflowConfig = {
       server: {
         command: 'nonexistent-command-that-will-fail',
         args: [],
-        port: config.testPort + 12,
+        port: testPort,
         cwd: config.testRepoPath,
         startupTimeout: 5000
       },
       tunnel: {
-        port: config.testPort + 12,
+        port: testPort,
         authtoken: config.ngrokAuthToken
       },
       test: {
@@ -321,7 +342,8 @@ describeIntegration('End-to-End Workflow Integration', () => {
       return;
     }
 
-    const testPort = config.testPort + 13;
+    // Use dynamic port allocation
+    const testPort = await findAvailablePort(config.testPort + 150);
     
     // Test server readiness detection
     const serverNotReady = await testManager.waitForServer(testPort, 2000);

@@ -17,6 +17,11 @@
  * - INTEGRATION_SKIP_WORKFLOW: Skip workflow tests (default: false)
  * - INTEGRATION_TEST_REPO: Path to test repository (default: current directory)
  * 
+ * CI Environment Behavior:
+ * - RUN_INTEGRATION_TESTS: Set to 'true' to enable integration tests in CI (default: false)
+ * - RUN_BACKEND_TESTS: Set to 'true' to enable backend-dependent tests in CI (default: false)
+ * - Tests are automatically skipped in CI environments unless explicitly enabled
+ * 
  * @jest-environment node
  * @fileoverview Configuration utilities for integration tests - not a test file
  */
@@ -77,6 +82,11 @@ Add it to your .env file in the project root or set it as an environment variabl
 }
 
 export function shouldRunIntegrationTests(): boolean {
+  // Skip integration tests in CI environments unless explicitly enabled
+  if (isCI() && !process.env.RUN_INTEGRATION_TESTS) {
+    return false;
+  }
+
   const apiKey = process.env.DEBUGGAI_API_KEY;
   const ngrokToken = process.env.NGROK_AUTH_TOKEN;
   
@@ -94,6 +104,66 @@ export function shouldRunIntegrationTests(): boolean {
     !ngrokToken.includes('your-');
   
   return !!(hasValidApiKey && hasValidNgrokToken);
+}
+
+/**
+ * Detect if running in CI environment
+ */
+export function isCI(): boolean {
+  return !!(
+    process.env.CI || // Generic CI flag
+    process.env.GITHUB_ACTIONS || // GitHub Actions
+    process.env.TRAVIS || // Travis CI
+    process.env.CIRCLECI || // Circle CI
+    process.env.JENKINS_URL || // Jenkins
+    process.env.BUILDKITE || // Buildkite
+    process.env.GITLAB_CI // GitLab CI
+  );
+}
+
+/**
+ * Check if backend-dependent tests should run
+ */
+export function shouldRunBackendTests(): boolean {
+  // In CI, skip backend tests unless explicitly enabled
+  if (isCI() && !process.env.RUN_BACKEND_TESTS) {
+    return false;
+  }
+  
+  // Otherwise use the same logic as integration tests
+  return shouldRunIntegrationTests();
+}
+
+/**
+ * Describe block for backend-dependent tests
+ * Skips tests in CI unless explicitly enabled
+ */
+export function describeBackend(name: string, fn: () => void): void {
+  const shouldRun = shouldRunBackendTests();
+  
+  if (!shouldRun) {
+    describe.skip(`${name} (skipped - ${isCI() ? 'CI environment' : 'no credentials'})`, fn);
+  } else {
+    describe(name, fn);
+  }
+}
+
+/**
+ * Test block for backend-dependent tests
+ * Skips tests in CI unless explicitly enabled
+ */
+export function itBackend(
+  name: string, 
+  fn?: jest.ProvidesCallback, 
+  timeout?: number
+): void {
+  const shouldRun = shouldRunBackendTests();
+  
+  if (!shouldRun) {
+    it.skip(`${name} (skipped - ${isCI() ? 'CI environment' : 'no credentials'})`, fn, timeout);
+  } else {
+    it(name, fn, timeout);
+  }
 }
 
 export function describeIntegration(name: string, fn: () => void): void {
