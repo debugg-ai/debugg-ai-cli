@@ -1,6 +1,7 @@
 // services/issues.ts
 import { CoverageResponse } from "../types";
 import { AxiosTransport } from "../utils/axiosTransport";
+import { systemLogger } from "../../util/system-logger";
 
 
 export interface CoverageService {
@@ -23,14 +24,14 @@ export const createCoverageService = (tx: AxiosTransport): CoverageService => ({
     ): Promise<CoverageResponse | null> {
         try {
             const serverUrl = "api/v1/coverage/";
-            console.log('Branch name - ', branchName, ' repo name - ', repoName, ' repo path - ', params?.repoPath);
+            systemLogger.debug('Branch name - ', branchName, ' repo name - ', repoName, ' repo path - ', params?.repoPath);
 
             let relativePath = filePath;
             // Convert absolute path to relative path
             if (params?.repoPath) {
                 relativePath = filePath.replace(params?.repoPath + "/", "");
             } else {
-                console.log("No repo path found for file");
+                systemLogger.debug("No repo path found for file");
                 // split based on the repo name
                 const repoBaseName = repoName.split("/")[-1];  // typically the form of 'userName/repoName'
                 const splitPath = filePath.split(repoBaseName);
@@ -40,7 +41,7 @@ export const createCoverageService = (tx: AxiosTransport): CoverageService => ({
                     relativePath = filePath;
                 }
             }
-            console.log("GET_COVERAGE: Full path - ", filePath, ". Relative path - ", relativePath);
+            systemLogger.debug("GET_COVERAGE: Full path - ", filePath, ". Relative path - ", relativePath);
             const fileParams = {
                 ...params,
                 fileContents: fileContents,
@@ -51,11 +52,11 @@ export const createCoverageService = (tx: AxiosTransport): CoverageService => ({
             };
             const response = await tx.post<CoverageResponse>(serverUrl, { ...fileParams });
 
-            console.log("Raw API response:", response);
+            log.debug("Raw API response", response);
             return response;
 
         } catch (err) {
-            console.error("Error creating coverage in file:", err);
+            systemLogger.error("Error creating coverage in file:", err);
             return null;
         }
     },
@@ -72,14 +73,14 @@ export const createCoverageService = (tx: AxiosTransport): CoverageService => ({
     ): Promise<CoverageResponse | null> {
         try {
             const serverUrl = "api/v1/coverage/log_failed_run/";
-            console.log('Branch name - ', branchName, ' repo name - ', repoName, ' repo path - ', params?.repoPath);
+            systemLogger.debug('Branch name - ', branchName, ' repo name - ', repoName, ' repo path - ', params?.repoPath);
 
             let relativePath = filePath;
             // Convert absolute path to relative path
             if (params?.repoPath) {
                 relativePath = filePath.replace(params?.repoPath + "/", "");
             } else {
-                console.log("No repo path found for file");
+                systemLogger.debug("No repo path found for file");
                 // split based on the repo name
                 const repoBaseName = repoName.split("/")[-1];  // typically the form of 'userName/repoName'
                 const splitPath = filePath.split(repoBaseName);
@@ -89,7 +90,7 @@ export const createCoverageService = (tx: AxiosTransport): CoverageService => ({
                     relativePath = filePath;
                 }
             }
-            console.log("GET_COVERAGE: Full path - ", filePath, ". Relative path - ", relativePath);
+            systemLogger.debug("GET_COVERAGE: Full path - ", filePath, ". Relative path - ", relativePath);
             const fileParams = {
                 ...params,
                 fileContents: fileContents,
@@ -100,11 +101,11 @@ export const createCoverageService = (tx: AxiosTransport): CoverageService => ({
             };
             const response = await tx.post<CoverageResponse>(serverUrl, { ...fileParams });
 
-            console.log("Raw API response:", response);
+            log.debug("Raw API response", response);
             return response;
 
         } catch (err) {
-            console.error("Error logging failed run in file:", err);
+            systemLogger.error("Error logging failed run in file:", err);
             return null;
         }
     },
@@ -121,14 +122,14 @@ export const createCoverageService = (tx: AxiosTransport): CoverageService => ({
 
         try {
             const serverUrl = "api/v1/coverage/for_file/";
-            console.log('Branch name - ', branchName, ' repo name - ', repoName, ' repo path - ', params?.repoPath);
+            systemLogger.debug('Branch name - ', branchName, ' repo name - ', repoName, ' repo path - ', params?.repoPath);
 
             let relativePath = filePath;
             // Convert absolute path to relative path
             if (params?.repoPath) {
                 relativePath = filePath.replace(params?.repoPath + "/", "");
             } else {
-                console.log("No repo path found for file");
+                systemLogger.debug("No repo path found for file");
                 // split based on the repo name
                 const repoBaseName = repoName.split("/")[-1];  // typically the form of 'userName/repoName'
                 const splitPath = filePath.split(repoBaseName);
@@ -138,7 +139,7 @@ export const createCoverageService = (tx: AxiosTransport): CoverageService => ({
                     relativePath = filePath;
                 }
             }
-            console.log("GET_COVERAGE: Full path - ", filePath, ". Relative path - ", relativePath);
+            systemLogger.debug("GET_COVERAGE: Full path - ", filePath, ". Relative path - ", relativePath);
             const fileParams = {
                 ...params,
                 filePath: relativePath,
@@ -148,11 +149,11 @@ export const createCoverageService = (tx: AxiosTransport): CoverageService => ({
             };
             const response = await tx.get<CoverageResponse>(serverUrl, { ...fileParams });
 
-            console.log("Raw API response:", response);
+            log.debug("Raw API response", response);
             return response;
 
         } catch (err) {
-            console.error("Error fetching coverage in file:", err);
+            systemLogger.error("Error fetching coverage in file:", err);
             return null;
         }
 

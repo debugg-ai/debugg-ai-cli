@@ -4,6 +4,54 @@ import {
     objToCamelCase,
     objToSnakeCase,
 } from "../../util/objectNaming";
+import { log } from "../../util/logging";
+
+/**
+ * Utility function to truncate large objects for logging
+ */
+export function truncateForLogging(obj: any, maxChars: number = 500): any {
+    if (obj === null || obj === undefined) return obj;
+    
+    // If it's an array, show first few items and count
+    if (Array.isArray(obj)) {
+        const truncated = obj.slice(0, 2);
+        return truncated.length < obj.length 
+            ? [...truncated, `... ${obj.length - truncated.length} more items`]
+            : truncated;
+    }
+    
+    // If it's an object, show essential fields only
+    if (typeof obj === 'object') {
+        const essential: any = {};
+        
+        // Always include these fields if they exist
+        const keyFields = ['id', 'uuid', 'runStatus', 'status', 'name', 'title'];
+        keyFields.forEach(key => {
+            if (obj[key] !== undefined) {
+                essential[key] = obj[key];
+            }
+        });
+        
+        // Special handling for description - heavily truncate
+        if (obj.description) {
+            const desc = String(obj.description);
+            essential.description = desc.length > 100 ? desc.substring(0, 100) + '... (truncated)' : desc;
+        }
+        
+        // Add counts for arrays
+        Object.keys(obj).forEach(key => {
+            if (Array.isArray(obj[key])) {
+                essential[`${key}Count`] = obj[key].length;
+            }
+        });
+        
+        return essential;
+    }
+    
+    // For strings or other primitives, truncate if too long
+    const str = String(obj);
+    return str.length <= maxChars ? obj : str.substring(0, maxChars) + '... (truncated)';
+}
 
 /** Constructor options for CLI transport */
 export interface CLITransportOptions {
@@ -20,11 +68,8 @@ export interface CLITransportOptions {
  */
 export class CLITransport {
     protected readonly axios: AxiosInstance;
-    private instanceId: string = Math.random().toString(36).substring(7);
-    private apiKey: string;
 
     constructor({ baseUrl, apiKey, timeout, instance }: CLITransportOptions) {
-        this.apiKey = apiKey;
         
         // Use an injected instance or create one
         this.axios = instance ?? axios.create({
@@ -40,24 +85,22 @@ export class CLITransport {
         // Set authorization header in common headers
         this.axios.defaults.headers.common['Authorization'] = `Token ${apiKey}`;
         
-        console.log(`CLITransport created with baseURL: ${this.axios.defaults.baseURL}, instanceId: ${this.instanceId}`);
-        console.log(`Auth header: Token ${apiKey.substring(0, 10)}...`);
+        log.debug(`CLITransport created with baseURL: ${this.axios.defaults.baseURL}`);
 
         /* ---------- INTERCEPTORS ---------- */
         // Request → snake_case (preserve proven logic)
         this.axios.interceptors.request.use((cfg) => {
-            console.log(`Request interceptor - URL: ${cfg.url}, Method: ${cfg.method}, instanceId: ${this.instanceId}`);
-            console.log(`Request Authorization:`, cfg.headers?.Authorization);
+            log.debug(`${cfg.method?.toUpperCase()} ${cfg.url}`);
             
             // Verify the Authorization header format
             const authHeader = cfg.headers?.Authorization;
             if (authHeader && typeof authHeader === 'string') {
                 if (!authHeader.startsWith('Token ')) {
-                    console.warn(`⚠️ Authorization header doesn't start with 'Token ': ${authHeader}`);
+                    log.warn(`Authorization header doesn't start with 'Token '`);
                 }
                 const token = authHeader.replace('Token ', '');
                 if (token.length < 10) {
-                    console.warn(`⚠️ Token seems too short: ${token.length} characters`);
+                    log.warn(`Token seems too short: ${token.length} characters`);
                 }
             }
             
@@ -77,25 +120,23 @@ export class CLITransport {
                 return res;
             },
             async (err) => {
-                console.log(`Response interceptor caught error:`, {
+                log.error(`API Error: ${err.response?.status} ${err.config?.url}`, {
                     status: err.response?.status,
-                    detail: err.response?.data?.detail,
-                    url: err.config?.url,
-                    instanceId: this.instanceId
+                    detail: err.response?.data?.detail
                 });
                 
                 // Handle authentication failures
                 if (err.response?.status === 401) {
-                    console.error('Authentication failed. Please check your API key.');
+                    log.error('Authentication failed. Please check your API key.');
                     throw new Error('Authentication failed. Please check your API key.');
                 }
                 if (err.response?.status === 403) {
-                    console.error('Access forbidden. Please check your API key permissions.');
+                    log.error('Access forbidden. Please check your API key permissions.');
                     throw new Error('Access forbidden. Please check your API key permissions.');
                 }
                 if (err.response?.status >= 500) {
                     const message = `Server error: ${err.response.status} - ${err.response.statusText}`;
-                    console.error(message);
+                    log.error(message);
                     throw new Error(message);
                 }
                 
@@ -133,17 +174,13 @@ export class CLITransport {
      * Update the API key for this transport instance.
      */
     updateApiKey(apiKey: string): void {
-        console.log(`CLITransport.updateApiKey called with apiKey: ${apiKey.substring(0, 10)}..., instanceId: ${this.instanceId}`);
-        this.apiKey = apiKey;
+        log.debug(`Updating API key`);
         if (this.axios) {
-            console.log(`Before update - Authorization header: ${this.axios.defaults.headers.common['Authorization']}`);
             this.axios.defaults.headers.common['Authorization'] = `Token ${apiKey}`;
-            // Also update the instance headers directly
             this.axios.defaults.headers['Authorization'] = `Token ${apiKey}`;
-            console.log(`After update - Authorization header: ${this.axios.defaults.headers.common['Authorization']}`);
-            console.log(`Updated Authorization header to: Token ${apiKey.substring(0, 10)}...`);
+            log.debug(`API key updated`);
         } else {
-            console.warn('Axios instance not available for API key update');
+            log.warn('Axios instance not available for API key update');
         }
     }
 
@@ -158,10 +195,9 @@ export class CLITransport {
      * Verify that the axios instance is properly configured with the current API key.
      */
     verifyApiKeyConfiguration(): void {
-        console.log(`Verifying API key configuration for instanceId: ${this.instanceId}`);
-        console.log(`Default headers:`, this.axios?.defaults.headers);
-        console.log(`Common headers:`, this.axios?.defaults.headers.common);
-        console.log(`Authorization header:`, this.axios?.defaults.headers.common['Authorization']);
+        log.debug(`Verifying API key configuration`);
+        const authHeader = this.axios?.defaults.headers.common['Authorization'];
+        log.debug(`Authorization configured: ${authHeader ? 'Yes' : 'No'}`);
     }
 
     /**

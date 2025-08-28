@@ -4,7 +4,7 @@ import { TunnelManager, TunnelInfo } from './tunnel-manager';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import chalk from 'chalk';
-import ora, { Ora } from 'ora';
+import { systemLogger } from '../util/system-logger';
 
 export interface TestManagerOptions {
   apiKey: string;
@@ -45,7 +45,6 @@ export class TestManager {
   private gitAnalyzer: GitAnalyzer;
   private tunnelManager?: TunnelManager;
   private options: TestManagerOptions;
-  private spinner: Ora | null = null;
 
   constructor(options: TestManagerOptions) {
     this.options = {
@@ -110,7 +109,7 @@ export class TestManager {
    * Run tests for the current commit or working changes
    */
   async runCommitTests(): Promise<TestResult> {
-    this.spinner = ora('Initializing DebuggAI test run...').start();
+    systemLogger.info('Starting test analysis and generation', { category: 'test' });
 
     try {
       // Step 1: Validate git repository
@@ -120,67 +119,71 @@ export class TestManager {
       }
 
       // Step 2: Initialize the CLI client (includes connection test)
-      this.spinner.text = 'Initializing backend client...';
+      systemLogger.info('Initializing backend client', { category: 'test' });
       await this.client.initialize();
 
       // Step 3: Test authentication
-      this.spinner.text = 'Validating API key...';
+      systemLogger.info('Validating API key', { category: 'api' });
       const authTest = await this.client.testAuthentication();
       if (!authTest.success) {
         throw new Error(`Authentication failed: ${authTest.error}`);
       }
 
-      this.spinner.text = `Authenticated as user: ${authTest.user?.email || authTest.user?.id}`;
+      systemLogger.api.auth(true, authTest.user?.email || authTest.user?.id);
 
       // Step 4: Validate tunnel URL if provided (simplified for now)
       if (this.options.tunnelUrl) {
-        this.spinner.text = 'Using tunnel URL...';
+        systemLogger.info('Using tunnel URL', { category: 'tunnel' });
         // Note: Tunnel validation can be added later if needed
-        console.log(`Using tunnel URL: ${this.options.tunnelUrl}`);
+        systemLogger.info(`Using tunnel URL: ${this.options.tunnelUrl}`);
       }
 
       // Step 5: Analyze git changes
-      this.spinner.text = 'Analyzing git changes...';
+      systemLogger.info('Analyzing git changes', { category: 'git' });
       const changes = await this.analyzeChanges();
       
       if (changes.changes.length === 0) {
-        this.spinner.succeed('No changes detected - skipping test generation');
+        systemLogger.success('No changes detected - skipping test generation');
+        return {
+          success: true,
+          testFiles: []
+        };
         return {
           success: true,
           testFiles: []
         };
       }
 
-      this.spinner.text = `Found ${changes.changes.length} changed files`;
-
-      // Step 6: Create test description with enhanced context analysis
-      const testDescription = await this.createTestDescription(changes);
+      systemLogger.info(`Found ${changes.changes.length} changed files`, { category: 'git' });
 
       // Step 7: Submit test request
-      this.spinner.text = 'Creating test suite...';
+      systemLogger.info('Creating test suite', { category: 'test' });
       const testRequest: any = {
         repoName: this.gitAnalyzer.getRepoName(),
         repoPath: this.options.repoPath,
         branchName: changes.branchInfo.branch,
         commitHash: changes.branchInfo.commitHash,
-        workingChanges: changes.changes,
-        testDescription
+        workingChanges: changes.changes
       };
 
       // Add tunnel key (UUID) for custom endpoints (e.g., <uuid>.debugg.ai)
       // This tells the backend which subdomain to expect the tunnel on
       if (this.options.tunnelKey) {
         testRequest.key = this.options.tunnelKey;
+        systemLogger.debug('Sending tunnel key to backend', { 
+          category: 'tunnel',
+          details: { key: this.options.tunnelKey.substring(0, 8) + '...' } 
+        });
       }
 
-      if (this.options.tunnelUrl) {
-        testRequest.publicUrl = this.options.tunnelUrl;
-        testRequest.testEnvironment = {
-          url: this.options.tunnelUrl,
-          type: 'ngrok_tunnel' as const,
-          metadata: this.options.tunnelMetadata
-        };
-      }
+      // if (this.options.tunnelUrl) {
+      //   testRequest.publicUrl = this.options.tunnelUrl;
+      //   testRequest.testEnvironment = {
+      //     url: this.options.tunnelUrl,
+      //     type: 'ngrok_tunnel' as const,
+      //     metadata: this.options.tunnelMetadata
+      //   };
+      // }
 
       const response = await this.client.createCommitTestSuite(testRequest);
       
@@ -188,12 +191,25 @@ export class TestManager {
         throw new Error(`Failed to create test suite: ${response.error}`);
       }
 
-      this.spinner.text = `Test suite created: ${response.testSuiteUuid}`;
+      systemLogger.info(`Test suite created: ${response.testSuiteUuid}`, { category: 'test' });
 
       // Step 7.5: Create tunnel if requested and backend provided tunnelKey
       let tunnelInfo: TunnelInfo | undefined;
-      if (this.options.createTunnel && response.tunnelKey && this.options.tunnelKey) {
-        this.spinner.text = 'Creating ngrok tunnel...';
+      systemLogger.debug('Tunnel setup', { 
+        category: 'tunnel',
+        details: { 
+          createTunnel: this.options.createTunnel,
+          tunnelKey: this.options.tunnelKey,
+          backendTunnelKey: response.tunnelKey
+        } 
+      });
+      if (response.tunnelKey && this.options.tunnelKey) {
+        systemLogger.info('Setting up ngrok tunnel', { category: 'tunnel' });
+        systemLogger.info('TUNNEL SETUP');
+        systemLogger.info(`Endpoint UUID: ${this.options.tunnelKey}`);
+        systemLogger.info(`Expected URL: https://${this.options.tunnelKey}.ngrok.debugg.ai`);
+        systemLogger.info(`Local port: ${this.options.tunnelPort || 3000}`);
+        systemLogger.info(`Backend provided tunnelKey: ${response.tunnelKey ? '✓ YES' : '✗ NO'}`);
         
         if (!this.tunnelManager) {
           throw new Error('Tunnel manager not initialized. This should not happen.');
@@ -202,22 +218,33 @@ export class TestManager {
         const tunnelPort = this.options.tunnelPort || 3000;
         
         try {
+          systemLogger.info('Starting ngrok tunnel');
           tunnelInfo = await this.tunnelManager.createTunnelWithBackendKey(
             tunnelPort,
             this.options.tunnelKey, // UUID for endpoint
             response.tunnelKey       // ngrok auth token from backend
           );
           
-          this.spinner.text = `Tunnel created: ${tunnelInfo.url} -> localhost:${tunnelPort}`;
-          console.log(`✓ Tunnel ready: ${tunnelInfo.url}`);
+          systemLogger.tunnel.connected(tunnelInfo.url);
+          systemLogger.success(`TUNNEL ACTIVE: ${tunnelInfo.url} -> localhost:${tunnelPort}`);
         } catch (error) {
-          console.warn(`⚠ Failed to create tunnel: ${error instanceof Error ? error.message : 'Unknown error'}`);
-          console.log('Tests will proceed without tunnel - ensure your server is accessible at the expected URL');
+          systemLogger.error(`TUNNEL FAILED: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          systemLogger.warn('Tests will proceed without tunnel - ensure your server is accessible at the expected URL');
+          systemLogger.warn(`Expected backend URL: https://${this.options.tunnelKey}.ngrok.debugg.ai`);
+        }
+      } else {
+        // Log why tunnel wasn't created
+        if (this.options.createTunnel) {
+          systemLogger.info('TUNNEL SETUP SKIPPED');
+          systemLogger.debug(`createTunnel: ${this.options.createTunnel ? '✓' : '✗'}`);
+          systemLogger.debug(`tunnelKey provided: ${this.options.tunnelKey ? '✓' : '✗'}`);
+          systemLogger.debug(`backend tunnelKey: ${response.tunnelKey ? '✓' : '✗'}`);
+
         }
       }
 
       // Step 8: Wait for tests to complete
-      this.spinner.text = 'Waiting for tests to complete...';
+      systemLogger.info('Waiting for tests to complete', { category: 'test' });
       const completedSuite = await this.client.waitForCommitTestSuiteCompletion(
         response.testSuiteUuid,
         {
@@ -229,7 +256,7 @@ export class TestManager {
               t.curRun?.status === 'completed' || t.curRun?.status === 'failed'
             ).length || 0;
             
-            this.spinner!.text = `Running tests... (${completedTests}/${testCount} completed)`;
+            systemLogger.info(`Running tests... (${completedTests}/${testCount} completed)`, { category: 'test' });
           }
         }
       );
@@ -239,13 +266,13 @@ export class TestManager {
       }
 
       // Step 9: Download and save test artifacts
-      this.spinner.text = 'Downloading test artifacts...';
+      systemLogger.info('Downloading test artifacts', { category: 'test' });
       const testFiles = await this.saveTestArtifacts(completedSuite);
 
       // Step 10: Report results
       this.reportResults(completedSuite);
 
-      this.spinner.succeed(`Tests completed successfully! Generated ${testFiles.length} test files`);
+      systemLogger.success(`Tests completed successfully! Generated ${testFiles.length} test files`);
 
       const result: TestResult = {
         success: true,
@@ -267,7 +294,7 @@ export class TestManager {
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      this.spinner?.fail(`Test run failed: ${errorMsg}`);
+      systemLogger.error(`Test run failed: ${errorMsg}`);
       
       return {
         success: false,
@@ -278,13 +305,12 @@ export class TestManager {
       if (this.tunnelManager) {
         try {
           await this.tunnelManager.disconnectAll();
-          console.log('✓ Tunnels cleaned up');
+          systemLogger.info('✓ Tunnels cleaned up');
         } catch (error) {
-          console.warn('⚠ Failed to cleanup tunnels:', error);
+          systemLogger.warn('⚠ Failed to cleanup tunnels: ' + error);
         }
       }
       
-      this.spinner = null;
     }
   }
 
@@ -295,7 +321,7 @@ export class TestManager {
     const startTime = Date.now();
     const pollInterval = 2000;
 
-    this.spinner = ora(`Waiting for server on port ${port}...`).start();
+    systemLogger.info(`Waiting for server on port ${port}`, { category: 'server' });
 
     while (Date.now() - startTime < maxWaitTime) {
       try {
@@ -306,7 +332,7 @@ export class TestManager {
         });
 
         if (response.ok || response.status === 404) {
-          this.spinner.succeed(`Server is ready on port ${port}`);
+          systemLogger.success(`Server is ready on port ${port}`);
           return true;
         }
       } catch (error) {
@@ -316,7 +342,7 @@ export class TestManager {
       await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
 
-    this.spinner.fail(`Server on port ${port} did not start within ${maxWaitTime}ms`);
+    systemLogger.error(`Server on port ${port} did not start within ${maxWaitTime}ms`);
     return false;
   }
 
@@ -508,66 +534,132 @@ Test Requirements:
     const savedFiles: string[] = [];
     
     if (!suite.tests || suite.tests.length === 0) {
+      systemLogger.debug('No tests found in suite for artifact saving', { category: 'artifact' });
       return savedFiles;
     }
 
+    systemLogger.debug(`Starting to save artifacts for ${suite.tests.length} tests`, { category: 'artifact' });
+
     // Ensure test output directory exists
-    const outputDir = path.join(this.options.repoPath, this.options.testOutputDir!);
+    if (!this.options.testOutputDir) {
+      throw new Error('testOutputDir is undefined. This should not happen - please file a bug report.');
+    }
+    
+    const outputDir = path.join(this.options.repoPath, this.options.testOutputDir);
     await fs.ensureDir(outputDir);
 
     for (const test of suite.tests) {
-      if (!test.curRun) continue;
+      if (!test.curRun) {
+        systemLogger.debug(`Skipping test ${test.name || test.uuid} - no curRun data`, { category: 'artifact' });
+        continue;
+      }
 
       const testName = test.name || `test-${test.uuid?.substring(0, 8)}`;
       const testDir = path.join(outputDir, testName);
       await fs.ensureDir(testDir);
+      
+      systemLogger.debug(`Processing test: ${testName}`, { 
+        category: 'artifact',
+        details: {
+          hasScript: !!test.curRun.runScript,
+          hasGif: !!test.curRun.runGif,
+          hasJson: !!test.curRun.runJson,
+          testDir: path.relative(this.options.repoPath, testDir)
+        }
+      });
 
       // Save test script
       if (test.curRun.runScript) {
         try {
-          const scriptBuffer = await this.client.downloadArtifact(test.curRun.runScript);
-          if (scriptBuffer) {
-            const scriptPath = path.join(testDir, `${testName}.spec.js`);
-            await fs.writeFile(scriptPath, scriptBuffer);
+          const scriptPath = path.join(testDir, `${testName}.spec.js`);
+          // For scripts, we need to replace tunnel URLs with localhost - use originalBaseUrl like recordingHandler
+          // Fallback to port 3000 if tunnelPort is not set
+          const port = this.options.tunnelPort || 3000;
+          const originalBaseUrl = `http://localhost:${port}`;
+          
+          systemLogger.debug(`Downloading script for ${testName}`, { 
+            category: 'artifact',
+            details: {
+              url: test.curRun.runScript,
+              targetPath: path.relative(this.options.repoPath, scriptPath),
+              originalBaseUrl
+            }
+          });
+          
+          const success = await this.client.downloadArtifactToFile(test.curRun.runScript, scriptPath, originalBaseUrl);
+          systemLogger.debug(`Script download result for ${testName}: ${success}`, { category: 'artifact' });
+          
+          if (success) {
             savedFiles.push(scriptPath);
-            console.log(chalk.green(`✓ Saved test script: ${path.relative(this.options.repoPath, scriptPath)}`));
+            systemLogger.info(`✓ Saved test script: ${path.relative(this.options.repoPath, scriptPath)}`);
+          } else {
+            systemLogger.warn(`⚠ Script download failed for ${testName} - no file saved`);
           }
         } catch (error) {
-          console.warn(chalk.yellow(`⚠ Failed to download script for ${testName}: ${error}`));
+          systemLogger.warn(`⚠ Failed to download script for ${testName}: ${error}`);
         }
       }
 
       // Save test recording (GIF)
       if (test.curRun.runGif) {
         try {
-          const gifBuffer = await this.client.downloadArtifact(test.curRun.runGif);
-          if (gifBuffer) {
-            const gifPath = path.join(testDir, `${testName}-recording.gif`);
-            await fs.writeFile(gifPath, gifBuffer);
+          const gifPath = path.join(testDir, `${testName}-recording.gif`);
+          systemLogger.debug(`Downloading GIF for ${testName}`, { 
+            category: 'artifact',
+            details: {
+              url: test.curRun.runGif,
+              targetPath: path.relative(this.options.repoPath, gifPath)
+            }
+          });
+          
+          const success = await this.client.downloadArtifactToFile(test.curRun.runGif, gifPath);
+          systemLogger.debug(`GIF download result for ${testName}: ${success}`, { category: 'artifact' });
+          
+          if (success) {
             savedFiles.push(gifPath);
-            console.log(chalk.green(`✓ Saved test recording: ${path.relative(this.options.repoPath, gifPath)}`));
+            systemLogger.info(`✓ Saved test recording: ${path.relative(this.options.repoPath, gifPath)}`);
+          } else {
+            systemLogger.warn(`⚠ GIF download failed for ${testName} - no file saved`);
           }
         } catch (error) {
-          console.warn(chalk.yellow(`⚠ Failed to download recording for ${testName}: ${error}`));
+          systemLogger.warn(`⚠ Failed to download recording for ${testName}: ${error}`);
         }
       }
 
       // Save test details (JSON)
       if (test.curRun.runJson) {
         try {
-          const jsonBuffer = await this.client.downloadArtifact(test.curRun.runJson);
-          if (jsonBuffer) {
-            const jsonPath = path.join(testDir, `${testName}-details.json`);
-            await fs.writeFile(jsonPath, jsonBuffer);
+          const jsonPath = path.join(testDir, `${testName}-details.json`);
+          systemLogger.debug(`Downloading JSON for ${testName}`, { 
+            category: 'artifact',
+            details: {
+              url: test.curRun.runJson,
+              targetPath: path.relative(this.options.repoPath, jsonPath)
+            }
+          });
+          
+          const success = await this.client.downloadArtifactToFile(test.curRun.runJson, jsonPath);
+          systemLogger.debug(`JSON download result for ${testName}: ${success}`, { category: 'artifact' });
+          
+          if (success) {
             savedFiles.push(jsonPath);
-            console.log(chalk.green(`✓ Saved test details: ${path.relative(this.options.repoPath, jsonPath)}`));
+            systemLogger.info(`✓ Saved test details: ${path.relative(this.options.repoPath, jsonPath)}`);
+          } else {
+            systemLogger.warn(`⚠ JSON download failed for ${testName} - no file saved`);
           }
         } catch (error) {
-          console.warn(chalk.yellow(`⚠ Failed to download details for ${testName}: ${error}`));
+          systemLogger.warn(`⚠ Failed to download details for ${testName}: ${error}`);
         }
       }
     }
 
+    systemLogger.debug(`Artifact saving completed. Total files saved: ${savedFiles.length}`, { 
+      category: 'artifact',
+      details: {
+        savedFiles: savedFiles.map(f => path.relative(this.options.repoPath, f))
+      }
+    });
+    
     return savedFiles;
   }
 
@@ -575,32 +667,13 @@ Test Requirements:
    * Report test results to console
    */
   private reportResults(suite: any): void {
-    console.log('\n' + chalk.bold('=== Test Results ==='));
-    console.log(`Suite: ${suite.name || suite.uuid}`);
-    console.log(`Status: ${this.getStatusColor(suite.status || 'unknown')}`);
-    console.log(`Tests: ${suite.tests?.length || 0}`);
+    // Use systemLogger's displayResults which handles both dev and user modes
+    systemLogger.displayResults(suite);
 
+    // Set exit code for CI/CD
     if (suite.tests && suite.tests.length > 0) {
-      console.log('\n' + chalk.bold('Individual Tests:'));
-      
-      for (const test of suite.tests) {
-        const status = test.curRun?.status || 'unknown';
-        const statusColored = this.getStatusColor(status);
-        console.log(`  • ${test.name || test.uuid}: ${statusColored}`);
-      }
-
-      // Summary
-      const passed = suite.tests.filter((t: any) => t.curRun?.status === 'completed').length;
       const failed = suite.tests.filter((t: any) => t.curRun?.status === 'failed').length;
-      const total = suite.tests.length;
-
-      console.log('\n' + chalk.bold('Summary:'));
-      console.log(`  ${chalk.green(`✓ Passed: ${passed}`)}`);
-      console.log(`  ${chalk.red(`✗ Failed: ${failed}`)}`);
-      console.log(`  ${chalk.blue(`Total: ${total}`)}`);
-
       if (failed > 0) {
-        console.log(`\n${chalk.yellow('⚠ Some tests failed. Check the generated test files and recordings for details.')}`);
         process.exitCode = 1; // Set non-zero exit code for CI/CD
       }
     }

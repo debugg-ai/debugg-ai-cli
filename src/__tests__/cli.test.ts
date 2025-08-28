@@ -19,7 +19,6 @@ jest.mock('chalk', () => ({
   level: 0
 }));
 jest.mock('../lib/test-manager');
-jest.mock('../lib/api-client');
 jest.mock('../lib/git-analyzer');
 jest.mock('dotenv', () => ({
   config: jest.fn()

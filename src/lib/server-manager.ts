@@ -1,5 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
 import axios, { AxiosError } from 'axios';
+import { systemLogger } from '../util/system-logger';
 
 export interface ServerConfig {
   command: string;
@@ -39,7 +40,7 @@ export class ServerManager {
 
   async startServer(id: string, config: ServerConfig): Promise<boolean> {
     if (this.servers.has(id)) {
-      console.log(`Server ${id} is already running`);
+      systemLogger.debug(`Server ${id} is already running`);
       return true;
     }
 
@@ -48,8 +49,8 @@ export class ServerManager {
     const startupTimeout = config.startupTimeout || this.defaultStartupTimeout;
     const url = `http://${host}:${config.port}`;
 
-    console.log(`Starting server ${id}: ${config.command} ${config.args?.join(' ') || ''}`);
-    console.log(`Expected URL: ${url}`);
+    systemLogger.debug(`Starting server ${id}: ${config.command} ${config.args?.join(' ') || ''}`);
+    systemLogger.debug(`Expected URL: ${url}`);
 
     return new Promise((resolve, reject) => {
       const serverProcess = spawn(config.command, config.args || [], {
@@ -77,7 +78,7 @@ export class ServerManager {
       });
 
       serverProcess.on('exit', (code, signal) => {
-        console.log(`Server ${id} exited with code ${code}, signal ${signal}`);
+        systemLogger.debug(`Server ${id} exited with code ${code}, signal ${signal}`);
         this.servers.delete(id);
         this.serverConfigs.delete(id);
         
@@ -91,7 +92,7 @@ export class ServerManager {
       if (serverProcess.stdout) {
         serverProcess.stdout.on('data', (data) => {
           const output = data.toString();
-          console.log(`[${id}] ${output.trim()}`);
+          systemLogger.debug(`[${id}] ${output.trim()}`);
           
           if (config.readyRegex && config.readyRegex.test(output)) {
             if (!resolved) {
@@ -99,7 +100,7 @@ export class ServerManager {
               clearTimeout(timeout);
               this.servers.set(id, serverProcess);
               this.serverConfigs.set(id, config);
-              console.log(`Server ${id} is ready (detected from output)`);
+              systemLogger.debug(`Server ${id} is ready (detected from output)`);
               resolve(true);
             }
           }
@@ -108,7 +109,7 @@ export class ServerManager {
 
       if (serverProcess.stderr) {
         serverProcess.stderr.on('data', (data) => {
-          console.error(`[${id}] ERROR: ${data.toString().trim()}`);
+          systemLogger.error(`[${id}] ERROR: ${data.toString().trim()}`);
         });
       }
 
@@ -122,7 +123,7 @@ export class ServerManager {
               resolved = true;
               clearTimeout(timeout);
               if (ready) {
-                console.log(`Server ${id} is ready (health check passed)`);
+                systemLogger.debug(`Server ${id} is ready (health check passed)`);
                 resolve(true);
               } else {
                 this.stopServer(id);
@@ -145,15 +146,15 @@ export class ServerManager {
   async stopServer(id: string): Promise<void> {
     const serverProcess = this.servers.get(id);
     if (!serverProcess) {
-      console.log(`Server ${id} is not running`);
+      systemLogger.debug(`Server ${id} is not running`);
       return;
     }
 
-    console.log(`Stopping server ${id}...`);
+    systemLogger.debug(`Stopping server ${id}...`);
     
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
-        console.log(`Force killing server ${id}...`);
+        systemLogger.debug(`Force killing server ${id}...`);
         serverProcess.kill('SIGKILL');
         resolve();
       }, 5000);
@@ -169,14 +170,14 @@ export class ServerManager {
 
   async stopAllServers(): Promise<void> {
     const serverIds = Array.from(this.servers.keys());
-    console.log(`Stopping ${serverIds.length} servers...`);
+    systemLogger.debug(`Stopping ${serverIds.length} servers...`);
     
     const stopPromises = serverIds.map(id => this.stopServer(id));
     await Promise.all(stopPromises);
     
     this.servers.clear();
     this.serverConfigs.clear();
-    console.log('All servers stopped');
+    systemLogger.debug('All servers stopped');
   }
 
   getServerStatus(id: string): ServerStatus {
@@ -271,7 +272,7 @@ export class ServerManager {
     const healthPath = config.healthPath || this.defaultHealthPath;
     const url = `http://${host}:${config.port}${healthPath}`;
 
-    console.log(`Waiting for server ${id} to be ready at ${url}...`);
+    systemLogger.debug(`Waiting for server ${id} to be ready at ${url}...`);
     return this.waitForServerHealth(url, timeout);
   }
 }

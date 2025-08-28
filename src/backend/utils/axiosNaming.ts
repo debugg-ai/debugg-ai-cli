@@ -1,4 +1,5 @@
 import { objToCamelCase, objToSnakeCase } from "../../util/objectNaming";
+import { log } from "../../util/logging";
 
 import { destroy as destroyAxios, get as getAxios, post as postAxios, put as putAxios } from "./axios";
 
@@ -10,7 +11,7 @@ interface AxiosResponse<T = any> {
 export async function get(url: string, params?: any): Promise<AxiosResponse> {
   const fmtdParams = objToSnakeCase(params);
   return getAxios(url, fmtdParams).then((response: AxiosResponse) => {
-    console.log("response", response);
+    log.debug("response", response);
     const fmtdData = objToCamelCase(response.data);
     response.data = fmtdData;
     return response;

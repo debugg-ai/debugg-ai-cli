@@ -1,6 +1,7 @@
 import { AxiosResponse } from "axios";
 import { ArtifactType, EmbeddingsCacheResponse } from "../interface";
 import { AxiosTransport } from "../utils/axiosTransport";
+import { systemLogger } from "../../util/system-logger";
 /**
  * Service for retrieving embeddings cache responses from the server.
  * 
@@ -38,7 +39,7 @@ export const createIndexesService = (tx: AxiosTransport): IndexesService => ({
     artifactId: T;
     repo: string;
   }): Promise<EmbeddingsCacheResponse<T>[]> {
-    console.log('TODO: Indexes not implemented. Returning empty array. Getting indexes', params);
+    systemLogger.debug('TODO: Indexes not implemented. Returning empty array. Getting indexes', params);
     return [];
     const response = await tx.post("/api/v1/indexes", {
       params,
@@ -46,7 +47,7 @@ export const createIndexesService = (tx: AxiosTransport): IndexesService => ({
 
     if (response.status !== 200) {
         const text = await response.data;
-        console.warn(
+        systemLogger.warn(
           `Failed to retrieve from remote cache (HTTP ${response.status}): ${text}`,
         );
         return [];

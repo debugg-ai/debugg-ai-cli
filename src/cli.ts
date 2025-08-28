@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 
 import { Command } from 'commander';
-import chalk from 'chalk';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import { config } from 'dotenv';
 import { TestManager } from './lib/test-manager';
 import { WorkflowOrchestrator } from './lib/workflow-orchestrator';
+import { systemLogger } from './util/system-logger';
+import { randomUUID } from 'crypto';
 
 // Load environment variables
 config();
@@ -33,21 +34,36 @@ program
   .option('--server-port <port>', 'Local server port to wait for (default: 3000)', '3000')
   .option('--server-timeout <ms>', 'Server wait timeout in milliseconds (default: 60000)', '60000')
   .option('--max-test-time <ms>', 'Maximum test wait time in milliseconds (default: 600000)', '600000')
+  .option('--tunnel-uuid <uuid>', 'Create ngrok tunnel with custom UUID endpoint (e.g., <uuid>.debugg.ai)')
+  .option('--tunnel-port <port>', 'Port to tunnel (default: 3000)', '3000')
+  .option('-v, --verbose', 'Enable verbose logging for debugging')
+  .option('--dev', 'Enable development logging (shows all technical details, tunnel info, API calls, git details, timing)')
   .option('--no-color', 'Disable colored output')
   .action(async (options) => {
     try {
-      // Disable colors if requested
+      // Set up logging mode based on flags
+      if (options.dev) {
+        systemLogger.setDevMode(true);
+        systemLogger.debug('Development mode enabled - showing all technical details');
+      } else if (options.verbose) {
+        systemLogger.setDevMode(true);
+        systemLogger.debug('Verbose logging enabled');
+      }
+      
+      // Disable colors if requested (now handled by loggers)
       if (options.noColor) {
-        chalk.level = 0;
+        // Color handling is now managed by the logger system
       }
 
-      console.log(chalk.blue.bold('DebuggAI Test Runner'));
-      console.log(chalk.gray('='.repeat(50)));
+      systemLogger.info('DebuggAI Test Runner');
+      if (!systemLogger.getDevMode()) {
+        console.log('='.repeat(50));
+      }
 
       // Get API key
       const apiKey = options.apiKey || process.env.DEBUGGAI_API_KEY;
       if (!apiKey) {
-        console.error(chalk.red('Error: API key is required. Provide it via --api-key or DEBUGGAI_API_KEY environment variable.'));
+        systemLogger.error('API key is required. Provide it via --api-key or DEBUGGAI_API_KEY environment variable.');
         process.exit(1);
       }
 
@@ -56,67 +72,119 @@ program
       
       // Validate repository path exists
       if (!await fs.pathExists(repoPath)) {
-        console.error(chalk.red(`Error: Repository path does not exist: ${repoPath}`));
+        systemLogger.error(`Repository path does not exist: ${repoPath}`);
         process.exit(1);
       }
 
       // Validate it's a git repository
       const gitDir = path.join(repoPath, '.git');
       if (!await fs.pathExists(gitDir)) {
-        console.error(chalk.red(`Error: Not a git repository: ${repoPath}`));
+        systemLogger.error(`Not a git repository: ${repoPath}`);
         process.exit(1);
       }
 
-      console.log(chalk.gray(`Repository: ${repoPath}`));
-      console.log(chalk.gray(`API Key: ${apiKey.substring(0, 8)}...`));
+      systemLogger.debug('CLI configuration', { 
+        category: 'cli',
+        details: { repoPath, apiKey: `${apiKey.substring(0, 8)}...` } 
+      } as any);
 
+      // Generate a tunnel key for backend to create tunnel endpoints
+      const tunnelKey = randomUUID();
+      systemLogger.debug('Generated tunnel key', { 
+        category: 'tunnel',
+        details: { key: tunnelKey.substring(0, 8) + '...' } 
+      } as any);
+      
       // Initialize test manager (after all validations pass)
-      const testManager = new TestManager({
-        apiKey,
-        repoPath,
-        baseUrl: options.baseUrl,
-        testOutputDir: options.outputDir,
-        serverTimeout: parseInt(options.serverTimeout) || 60000,
-        maxTestWaitTime: parseInt(options.maxTestTime) || 600000,
-        // Commit analysis options
-        commit: options.commit,
-        commitRange: options.commitRange,
-        since: options.since,
-        ...(options.last && { last: parseInt(options.last) })
-      });
+      let testManager: TestManager;
+      
+      if (options.tunnelUuid) {
+        // Use new auto-tunnel flow where backend provides ngrok token after commit suite creation
+        systemLogger.debug('Using auto-tunnel mode', { 
+          category: 'tunnel',
+          details: { uuid: options.tunnelUuid } 
+        } as any);
+        systemLogger.info(`Using auto-tunnel mode with UUID: ${options.tunnelUuid}`);
+        testManager = TestManager.withAutoTunnel({
+          apiKey,
+          repoPath,
+          baseUrl: options.baseUrl,
+          ...(options.outputDir && { testOutputDir: options.outputDir }),
+          serverTimeout: parseInt(options.serverTimeout) || 60000,
+          maxTestWaitTime: parseInt(options.maxTestTime) || 600000,
+          tunnelKey, // Pass the generated tunnel key
+          // Commit analysis options
+          commit: options.commit,
+          commitRange: options.commitRange,
+          since: options.since,
+          ...(options.last && { last: parseInt(options.last) })
+        }, options.tunnelUuid, parseInt(options.tunnelPort) || 3000);
+      } else {
+        // Standard mode with tunnel key for backend tunnel creation
+        testManager = new TestManager({
+          apiKey,
+          repoPath,
+          baseUrl: options.baseUrl,
+          ...(options.outputDir && { testOutputDir: options.outputDir }),
+          serverTimeout: parseInt(options.serverTimeout) || 60000,
+          maxTestWaitTime: parseInt(options.maxTestTime) || 600000,
+          tunnelKey, // Pass the generated tunnel key
+          createTunnel: true, // Enable tunnel creation
+          tunnelPort: parseInt(options.serverPort) || 3000, // Use server port for tunnel
+          // Commit analysis options
+          commit: options.commit,
+          commitRange: options.commitRange,
+          since: options.since,
+          ...(options.last && { last: parseInt(options.last) })
+        });
+      }
 
       // Wait for server if requested
       if (options.waitForServer) {
         const serverPort = parseInt(options.serverPort);
         const serverTimeout = parseInt(options.serverTimeout) || 60000;
         
-        console.log(chalk.blue(`\nWaiting for development server on port ${serverPort}...`));
+        systemLogger.debug('Waiting for development server', { 
+          category: 'server',
+          details: { port: serverPort, timeout: serverTimeout } 
+        } as any);
+        
+        if (systemLogger.getDevMode()) {
+          systemLogger.debug(`Waiting for development server on port ${serverPort}`, { category: 'server' } as any);
+        } else {
+          (systemLogger.progress as any).start(`Waiting for development server on port ${serverPort}`);
+        }
         
         const serverReady = await testManager.waitForServer(serverPort, serverTimeout);
         if (!serverReady) {
-          console.error(chalk.red(`Server on port ${serverPort} did not start within ${serverTimeout}ms`));
+          systemLogger.error(`Server on port ${serverPort} did not start within ${serverTimeout}ms`);
           process.exit(1);
         }
       }
 
       // Run the tests
-      console.log(chalk.blue('\nStarting test analysis and generation...'));
+      if (systemLogger.getDevMode()) {
+        systemLogger.debug('Starting test analysis and generation', { category: 'test' } as any);
+      } else {
+        (systemLogger.progress as any).start('Starting test analysis and generation');
+      }
       const result = await testManager.runCommitTests();
 
       if (result.success) {
-        console.log(chalk.green('\n✅ Tests completed successfully!'));
+        systemLogger.success('Tests completed successfully!');
         
         if (result.testFiles && result.testFiles.length > 0) {
-          console.log(chalk.blue('\nGenerated test files:'));
-          for (const file of result.testFiles) {
-            console.log(chalk.gray(`  • ${path.relative(repoPath, file)}`));
-          }
+          systemLogger.displayFileList(result.testFiles, repoPath);
         }
 
-        console.log(chalk.blue(`\nTest suite ID: ${result.suiteUuid}`));
+        systemLogger.debug('Test suite completed', { 
+          category: 'test',
+          details: { suiteUuid: result.suiteUuid } 
+        } as any);
+        systemLogger.info(`Test suite ID: ${result.suiteUuid}`);
         process.exit(0);
       } else {
-        console.error(chalk.red(`\n❌ Tests failed: ${result.error}`));
+        systemLogger.error(`Tests failed: ${result.error}`);
         process.exit(1);
       }
 
@@ -126,12 +194,10 @@ program
         throw error;
       }
       
-      console.error(chalk.red('\n💥 Unexpected error:'));
-      console.error(error instanceof Error ? error.message : String(error));
+      systemLogger.error('Unexpected error: ' + (error instanceof Error ? error.message : String(error)));
       
       if (process.env.DEBUG) {
-        console.error('\nStack trace:');
-        console.error(error);
+        systemLogger.error('Stack trace: ' + (error as any)?.stack);
       }
       
       process.exit(1);
@@ -144,21 +210,29 @@ program
   .requiredOption('-s, --suite-id <id>', 'Test suite UUID')
   .option('-k, --api-key <key>', 'DebuggAI API key (can also use DEBUGGAI_API_KEY env var)')
   .option('-u, --base-url <url>', 'API base URL (default: https://api.debugg.ai)')
+  .option('--dev', 'Enable development logging (shows all technical details)')
   .option('--no-color', 'Disable colored output')
   .action(async (options) => {
     try {
-      // Disable colors if requested
+      // Set up development mode
+      if (options.dev) {
+        process.env.DEBUGGAI_LOG_LEVEL = 'DEBUG';
+        process.env.DEBUGGAI_DEV_MODE = 'true';
+        systemLogger.debug('Development mode enabled');
+      }
+      
+      // Disable colors if requested (now handled by loggers)
       if (options.noColor) {
-        chalk.level = 0;
+        // Color handling is now managed by the logger system
       }
 
-      console.log(chalk.blue.bold('DebuggAI Test Status'));
-      console.log(chalk.gray('='.repeat(50)));
+      systemLogger.info('DebuggAI Test Status');
+      console.log('='.repeat(50));
 
       // Get API key
       const apiKey = options.apiKey || process.env.DEBUGGAI_API_KEY;
       if (!apiKey) {
-        console.error(chalk.red('Error: API key is required.'));
+        systemLogger.error('API key is required.');
         process.exit(1);
       }
 
@@ -170,20 +244,20 @@ program
       });
 
       // Get test suite status
-      const suite = await (testManager as any).client.getTestSuiteStatus(options.suiteId);
+      const suite = await (testManager as any).client.getCommitTestSuiteStatus(options.suiteId);
       
       if (!suite) {
-        console.error(chalk.red(`Test suite not found: ${options.suiteId}`));
+        systemLogger.error(`Test suite not found: ${options.suiteId}`);
         process.exit(1);
       }
 
-      console.log(chalk.blue(`Suite ID: ${suite.uuid}`));
-      console.log(chalk.blue(`Name: ${suite.name || 'Unnamed'}`));
-      console.log(chalk.blue(`Status: ${getStatusColor(suite.status || 'unknown')}`));
-      console.log(chalk.blue(`Tests: ${suite.tests?.length || 0}`));
+      systemLogger.info(`Suite ID: ${suite.uuid}`);
+      systemLogger.info(`Name: ${suite.name || 'Unnamed'}`);
+      systemLogger.info(`Status: ${getStatusColor(suite.status || 'unknown')}`);
+      systemLogger.info(`Tests: ${suite.tests?.length || 0}`);
 
       if (suite.tests && suite.tests.length > 0) {
-        console.log('\n' + chalk.bold('Test Details:'));
+        systemLogger.info('\nTest Details:');
         for (const test of suite.tests) {
           const status = test.curRun?.status || 'unknown';
           console.log(`  • ${test.name || test.uuid}: ${getStatusColor(status)}`);
@@ -196,8 +270,7 @@ program
         throw error;
       }
       
-      console.error(chalk.red('Error checking status:'));
-      console.error(error instanceof Error ? error.message : String(error));
+      systemLogger.error('Error checking status: ' + (error instanceof Error ? error.message : String(error)));
       process.exit(1);
     }
   });
@@ -211,21 +284,29 @@ program
   .option('-b, --branch <name>', 'Branch name filter')
   .option('-l, --limit <number>', 'Limit number of results (default: 20)', '20')
   .option('-p, --page <number>', 'Page number (default: 1)', '1')
+  .option('--dev', 'Enable development logging (shows all technical details)')
   .option('--no-color', 'Disable colored output')
   .action(async (options) => {
     try {
-      // Disable colors if requested
+      // Set up development mode
+      if (options.dev) {
+        process.env.DEBUGGAI_LOG_LEVEL = 'DEBUG';
+        process.env.DEBUGGAI_DEV_MODE = 'true';
+        systemLogger.debug('Development mode enabled');
+      }
+      
+      // Disable colors if requested (now handled by loggers)
       if (options.noColor) {
-        chalk.level = 0;
+        // Color handling is now managed by the logger system
       }
 
-      console.log(chalk.blue.bold('DebuggAI Test Suites'));
-      console.log(chalk.gray('='.repeat(50)));
+      systemLogger.info('DebuggAI Test Suites');
+      console.log('='.repeat(50));
 
       // Get API key
       const apiKey = options.apiKey || process.env.DEBUGGAI_API_KEY;
       if (!apiKey) {
-        console.error(chalk.red('Error: API key is required.'));
+        systemLogger.error('API key is required.');
         process.exit(1);
       }
 
@@ -245,17 +326,17 @@ program
       });
 
       if (result.suites.length === 0) {
-        console.log(chalk.yellow('No test suites found.'));
+        systemLogger.warn('No test suites found.');
         return;
       }
 
-      console.log(chalk.blue(`Found ${result.total} test suites (showing ${result.suites.length}):\n`));
+      systemLogger.info(`Found ${result.total} test suites (showing ${result.suites.length}):`); console.log('');
 
       for (const suite of result.suites) {
-        console.log(`${chalk.bold(suite.name || suite.uuid)}`);
+        console.log(`${suite.name || suite.uuid}`);
         console.log(`  Status: ${getStatusColor(suite.status || 'unknown')}`);
         console.log(`  Tests: ${suite.tests?.length || 0}`);
-        console.log(`  UUID: ${chalk.gray(suite.uuid)}`);
+        console.log(`  UUID: ${suite.uuid}`);
         console.log('');
       }
 
@@ -265,8 +346,7 @@ program
         throw error;
       }
       
-      console.error(chalk.red('Error listing test suites:'));
-      console.error(error instanceof Error ? error.message : String(error));
+      systemLogger.error('Error listing test suites: ' + (error instanceof Error ? error.message : String(error)));
       process.exit(1);
     }
   });
@@ -292,21 +372,29 @@ program
   .option('--cleanup-on-success', 'Cleanup resources after successful completion (default: true)', true)
   .option('--cleanup-on-error', 'Cleanup resources after errors (default: true)', true)
   .option('--verbose', 'Verbose logging')
+  .option('--dev', 'Enable development logging (shows all technical details, server logs, tunnel info)')
   .option('--no-color', 'Disable colored output')
   .action(async (options) => {
     try {
-      // Disable colors if requested
+      // Set up development mode
+      if (options.dev) {
+        process.env.DEBUGGAI_LOG_LEVEL = 'DEBUG';
+        process.env.DEBUGGAI_DEV_MODE = 'true';
+        systemLogger.debug('Development mode enabled');
+      }
+      
+      // Disable colors if requested (now handled by loggers)
       if (options.noColor) {
-        chalk.level = 0;
+        // Color handling is now managed by the logger system
       }
 
-      console.log(chalk.blue.bold('DebuggAI Workflow Runner'));
-      console.log(chalk.gray('='.repeat(50)));
+      systemLogger.info('DebuggAI Workflow Runner');
+      console.log('='.repeat(50));
 
       // Get API key
       const apiKey = options.apiKey || process.env.DEBUGGAI_API_KEY;
       if (!apiKey) {
-        console.error(chalk.red('Error: API key is required. Provide it via --api-key or DEBUGGAI_API_KEY environment variable.'));
+        systemLogger.error('API key is required. Provide it via --api-key or DEBUGGAI_API_KEY environment variable.');
         process.exit(1);
       }
 
@@ -315,19 +403,21 @@ program
       
       // Validate repository path exists
       if (!await fs.pathExists(repoPath)) {
-        console.error(chalk.red(`Error: Repository path does not exist: ${repoPath}`));
+        systemLogger.error(`Repository path does not exist: ${repoPath}`);
         process.exit(1);
       }
 
       // Validate it's a git repository
       const gitDir = path.join(repoPath, '.git');
       if (!await fs.pathExists(gitDir)) {
-        console.error(chalk.red(`Error: Not a git repository: ${repoPath}`));
+        systemLogger.error(`Not a git repository: ${repoPath}`);
         process.exit(1);
       }
 
-      console.log(chalk.gray(`Repository: ${repoPath}`));
-      console.log(chalk.gray(`API Key: ${apiKey.substring(0, 8)}...`));
+      systemLogger.debug('Workflow configuration', { 
+        category: 'workflow',
+        details: { repoPath, apiKey: `${apiKey.substring(0, 8)}...` } 
+      } as any);
 
       // Parse server command and args
       const [command, ...defaultArgs] = options.command.split(' ');
@@ -346,11 +436,19 @@ program
         });
       }
 
+      // Generate a tunnel key for backend to create tunnel endpoints
+      const tunnelKey = randomUUID();
+      systemLogger.debug('Generated tunnel key for workflow', { 
+        category: 'tunnel',
+        details: { key: tunnelKey.substring(0, 8) + '...' } 
+      } as any);
+
       // Initialize workflow orchestrator
       const orchestrator = new WorkflowOrchestrator({
         ngrokAuthToken: options.ngrokToken || process.env.NGROK_AUTH_TOKEN,
         baseDomain: options.baseDomain,
-        verbose: options.verbose
+        verbose: options.verbose || options.dev,  // Dev mode implies verbose
+        devMode: options.dev
       });
 
       // Configure workflow
@@ -374,7 +472,10 @@ program
           baseUrl: options.baseUrl,
           repoPath,
           testOutputDir: options.outputDir,
-          maxTestWaitTime: parseInt(options.maxTestTime)
+          maxTestWaitTime: parseInt(options.maxTestTime),
+          tunnelKey, // Add the generated tunnel key
+          createTunnel: true, // Enable tunnel creation
+          tunnelPort: parseInt(options.port) || 3000 // Use server port for tunnel
         },
         cleanup: {
           onSuccess: options.cleanupOnSuccess,
@@ -382,34 +483,32 @@ program
         }
       };
 
-      console.log(chalk.blue('\nStarting complete testing workflow...'));
+      systemLogger.debug('Starting workflow orchestrator');
+      (systemLogger.progress as any).start('Starting complete testing workflow');
       const result = await orchestrator.executeWorkflow(workflowConfig);
 
       if (result.success) {
-        console.log(chalk.green('\n✅ Workflow completed successfully!'));
+        systemLogger.success('Workflow completed successfully!');
         
         if (result.tunnelInfo) {
-          console.log(chalk.blue(`Tunnel URL: ${result.tunnelInfo.url}`));
+          systemLogger.info(`Tunnel URL: ${result.tunnelInfo.url}`);
         }
         
         if (result.serverUrl) {
-          console.log(chalk.blue(`Local Server: ${result.serverUrl}`));
+          systemLogger.info(`Local Server: ${result.serverUrl}`);
         }
 
         if (result.testResult?.testFiles && result.testResult.testFiles.length > 0) {
-          console.log(chalk.blue('\nGenerated test files:'));
-          for (const file of result.testResult.testFiles) {
-            console.log(chalk.gray(`  • ${path.relative(repoPath, file)}`));
-          }
+          systemLogger.displayFileList(result.testResult.testFiles, repoPath);
         }
 
         if (result.testResult?.suiteUuid) {
-          console.log(chalk.blue(`\nTest suite ID: ${result.testResult.suiteUuid}`));
+          systemLogger.info(`Test suite ID: ${result.testResult.suiteUuid}`);
         }
         
         process.exit(0);
       } else {
-        console.error(chalk.red(`\n❌ Workflow failed: ${result.error}`));
+        systemLogger.error(`Workflow failed: ${result.error}`);
         process.exit(1);
       }
 
@@ -419,12 +518,10 @@ program
         throw error;
       }
       
-      console.error(chalk.red('\n💥 Unexpected workflow error:'));
-      console.error(error instanceof Error ? error.message : String(error));
+      systemLogger.error('Unexpected workflow error: ' + (error instanceof Error ? error.message : String(error)));
       
       if (process.env.DEBUG) {
-        console.error('\nStack trace:');
-        console.error(error);
+        systemLogger.error('Stack trace: ' + (error as any)?.stack);
       }
       
       process.exit(1);
@@ -437,15 +534,15 @@ program
 function getStatusColor(status: string): string {
   switch (status) {
     case 'completed':
-      return chalk.green('✓ COMPLETED');
+      return '✓ COMPLETED';
     case 'failed':
-      return chalk.red('✗ FAILED');
+      return '✗ FAILED';
     case 'running':
-      return chalk.yellow('⏳ RUNNING');
+      return '⏳ RUNNING';
     case 'pending':
-      return chalk.blue('⏸ PENDING');
+      return '⏸ PENDING';
     default:
-      return chalk.gray('❓ UNKNOWN');
+      return '❓ UNKNOWN';
   }
 }
 
@@ -453,12 +550,12 @@ function getStatusColor(status: string): string {
 // Only add these handlers if we're not in a test environment
 if (process.env.NODE_ENV !== 'test') {
   process.on('unhandledRejection', (reason, promise) => {
-    console.error(chalk.red('Unhandled Rejection at:'), promise, chalk.red('reason:'), reason);
+    systemLogger.error('Unhandled Rejection at: promise=' + promise + ', reason=' + reason);
     process.exit(1);
   });
 
   process.on('uncaughtException', (error) => {
-    console.error(chalk.red('Uncaught Exception:'), error);
+    systemLogger.error('Uncaught Exception: ' + error);
     process.exit(1);
   });
 }

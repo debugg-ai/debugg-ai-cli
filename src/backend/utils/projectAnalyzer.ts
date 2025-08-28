@@ -1,5 +1,6 @@
 import path from "path";
 import { IDE } from "../../index.js";
+import { systemLogger } from "../../util/system-logger";
 
 export interface ProjectAnalysis {
   primaryLanguage: string | undefined;
@@ -185,7 +186,7 @@ export class ProjectAnalyzer {
       }
 
     } catch (error) {
-      console.warn("Error detecting primary language:", error);
+      systemLogger.warn("Error detecting primary language:", error);
       evidence.push("Error during detection");
     }
 
@@ -326,7 +327,7 @@ export class ProjectAnalyzer {
       }
 
     } catch (error) {
-      console.warn("Error detecting testing framework:", error);
+      systemLogger.warn("Error detecting testing framework:", error);
       evidence.push("Error during detection");
     }
 
@@ -440,7 +441,7 @@ export class ProjectAnalyzer {
       }
 
     } catch (error) {
-      console.warn("Error detecting testing language:", error);
+      systemLogger.warn("Error detecting testing language:", error);
       evidence.push("Error during detection");
     }
 
@@ -498,7 +499,7 @@ export class ProjectAnalyzer {
         };
       }
     } catch (error) {
-      console.warn("Error analyzing file extensions:", error);
+      systemLogger.warn("Error analyzing file extensions:", error);
     }
 
     return {
@@ -519,7 +520,7 @@ export class ProjectAnalyzer {
         return JSON.parse(content);
       }
     } catch (error) {
-      console.warn("Error reading package.json:", error);
+      systemLogger.warn("Error reading package.json:", error);
     }
     return null;
   }
@@ -800,10 +801,10 @@ export class ProjectAnalyzer {
         }
       }
 
-      console.log("Framework detection:", { framework: detectedFramework, evidence });
+      systemLogger.debug("Framework detection:", { framework: detectedFramework, evidence });
 
     } catch (error) {
-      console.warn("Error detecting framework:", error);
+      systemLogger.warn("Error detecting framework:", error);
       evidence.push("Error during detection");
     }
 
@@ -839,7 +840,7 @@ export class ProjectAnalyzer {
         }
       }
     } catch (error) {
-      console.warn(`Error checking Python dependency ${dependency}:`, error);
+      systemLogger.warn(`Error checking Python dependency ${dependency}:`, error);
     }
 
     return false;

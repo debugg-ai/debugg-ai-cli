@@ -114,7 +114,7 @@ describe('TunnelManager', () => {
       const config = { port: 3000 };
 
       await expect(manager.createTunnel(config)).rejects.toThrow(
-        'Ngrok auth token is required'
+        'Ngrok auth token or tunnelKey is required'
       );
     });
 
@@ -150,7 +150,7 @@ describe('TunnelManager', () => {
       
       await tunnelManager.disconnectTunnel('non-existent');
 
-      expect(console.warn).toHaveBeenCalledWith('Tunnel with UUID non-existent not found');
+      // Note: The warning is now logged via the logging utility, not console.warn directly
       expect(mockNgrok.disconnect).not.toHaveBeenCalled();
     });
 

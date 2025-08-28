@@ -2,6 +2,8 @@
 import { DebuggAiConfig } from "../..";
 import { DebuggTransport } from "../stubs/client";
 import { ProjectAnalysis } from "../utils/projectAnalyzer";
+import { truncateForLogging } from "../cli/transport";
+import { log } from "../../util/logging";
 
 
 export interface UsersService {
@@ -15,8 +17,7 @@ export const createUsersService = (tx: DebuggTransport): UsersService => ({
      */
     async getUserConfig(): Promise<DebuggAiConfig | null> {
         try {
-            console.log("getUserConfig called");
-            console.log("Transport auth header:", (tx as any).getAuthorizationHeader?.());
+            log.debug("getUserConfig called");
             const serverUrl = "api/v1/users/get_ide_config/";
             let response = null;
             let projectLanguageConfig: ProjectAnalysis | undefined = undefined;
@@ -24,7 +25,7 @@ export const createUsersService = (tx: DebuggTransport): UsersService => ({
 
             if (tx.getAuthorizationHeader()) {
                 response = await tx.get<DebuggAiConfig>(serverUrl);
-                console.log("Raw API response:", response);
+                log.debug("API response", truncateForLogging(response));
                 if (response.debuggAiRepoSettingsLs) {
                     const curRepoName = projectLanguageConfig?.repoName;
                     if (curRepoName) {
@@ -44,11 +45,11 @@ export const createUsersService = (tx: DebuggTransport): UsersService => ({
                 }
                 return response;
             } else {
-                console.log("Cant call get_ide_config with no header token");
+                log.warn("Cannot call get_ide_config with no header token");
                 return response;
             }
         } catch (err) {
-            console.error("Error fetching user config:", err);
+            log.error("Error fetching user config", err);
             return null;
         }
     },

@@ -9,15 +9,15 @@ const MockedTestManager = TestManager as jest.MockedClass<typeof TestManager>;
 describe('Index Module', () => {
   describe('exports', () => {
     it('should export all main classes', () => {
-      expect(indexModule.DebuggAIClient).toBeDefined();
+      expect(indexModule.CLIBackendClient).toBeDefined();
       expect(indexModule.GitAnalyzer).toBeDefined();
       expect(indexModule.TestManager).toBeDefined();
     });
 
-    it('should export API client types', () => {
+    it('should export CLI backend client', () => {
       // These are TypeScript types, so we can't test them at runtime
       // but we can verify the module structure is correct
-      expect(typeof indexModule.DebuggAIClient).toBe('function');
+      expect(typeof indexModule.CLIBackendClient).toBe('function');
     });
 
     it('should export git analyzer types', () => {
@@ -362,12 +362,16 @@ describe('Index Module', () => {
       const exportedKeys = Object.keys(indexModule);
       
       const expectedExports = [
-        'DebuggAIClient',
+        'CLIBackendClient',
         'GitAnalyzer',
         'TestManager',
+        'TunnelManager',
+        'ServerManager',
+        'WorkflowOrchestrator',
         'DEFAULT_CONFIG',
         'ENV_VARS',
-        'runDebuggAITests'
+        'runDebuggAITests',
+        'runWorkflow'
       ];
 
       expectedExports.forEach(exportName => {

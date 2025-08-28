@@ -1,6 +1,8 @@
 // backend/cli/services/e2es.ts - CLI-adapted E2E service
 import { E2eRun, E2eTest, E2eTestCommitSuite, E2eTestSuite, PaginatedResponse } from "../../types";
 import { CLIContextTransport } from "../context";
+import { truncateForLogging } from "../transport";
+import { log } from "../../../util/logging";
 
 export interface CLIE2esService {
     createE2eTest(description: string, params?: Record<string, any>): Promise<E2eTest | null>;
@@ -53,7 +55,7 @@ const processParamsForAPI = (contextTransport: CLIContextTransport, params: Reco
         branchName: branchName ?? contextProvider.getContext().branchName,
     };
     
-    console.log("Processed API params - ", body);
+    log.debug('Processed API params', { repoName: body.repoName, branchName: body.branchName, paramCount: Object.keys(body).length });
     return body;
 };
 
@@ -69,11 +71,11 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
             const serverUrl = "api/v1/e2e-tests/";
             const response = await transport.post<E2eTest>(serverUrl, { description, ...params });
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err) {
-            console.error("Error creating E2E test:", err);
+            log.error('Error creating E2E test', { error: String(err) });
             return null;
         }
     },
@@ -89,11 +91,11 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
             const serverUrl = `api/v1/e2e-tests/${uuid}/run/`;
             const response = await transport.post<E2eTest>(serverUrl, { ...params });
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err) {
-            console.error("Error running E2E test:", err);
+            log.error('Error running E2E test', { error: String(err) });
             return null;
         }
     },
@@ -107,12 +109,12 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
     ): Promise<E2eRun | null> {
         try {
             const serverUrl = "api/v1/e2e-runs/";
-            console.log('Branch name - ', branchName, ' repo name - ', repoName, ' repo path - ', params?.repoPath);
+            log.debug('E2E run parameters', { branchName, repoName, hasRepoPath: !!params?.repoPath });
 
             const contextProvider = transport.getContextProvider();
             const normalizedPaths = contextProvider.normalizeFilePath(filePath);
             
-            console.log("CREATE_E2E_RUN: Full path - ", filePath, ". Relative path - ", normalizedPaths.relativePath);
+            log.debug('Path normalization', { hasFullPath: !!filePath, hasRelativePath: !!normalizedPaths.relativePath });
             
             const fileParams = {
                 ...params,
@@ -125,11 +127,11 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
             
             const response = await transport.post<E2eRun>(serverUrl, fileParams, undefined, false);
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err) {
-            console.error("Error creating E2E run:", err);
+            log.error('Error creating E2E run', { error: String(err) });
             return null;
         }
     },
@@ -145,11 +147,11 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
             const serverUrl = `api/v1/e2e-runs/${uuid}/`;
             const response = await transport.get<E2eRun>(serverUrl, { ...params });
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err) {
-            console.error("Error fetching E2E run:", err);
+            log.error('Error fetching E2E run', { error: String(err) });
             return null;
         }
     },
@@ -165,11 +167,11 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
             const serverUrl = `api/v1/e2e-tests/${uuid}/`;
             const response = await transport.get<E2eTest>(serverUrl, { ...params });
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err) {
-            console.error("Error fetching E2E test:", err);
+            log.error('Error fetching E2E test', { error: String(err) });
             return null;
         }
     },
@@ -182,7 +184,7 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
             const serverUrl = `api/v1/e2e-tests/${uuid}/`;
             await transport.delete(serverUrl);
         } catch (err) {
-            console.error("Error deleting E2E test:", err);
+            log.error('Error deleting E2E test', { error: String(err) });
         }
     },
 
@@ -196,11 +198,11 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
             const serverUrl = `api/v1/e2e-tests/`;
             const response = await transport.get<PaginatedResponse<E2eTest>>(serverUrl, { ...params }, true);
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err: any) {
-            console.error("Error listing E2E tests:", err);
+            log.error('Error listing E2E tests', { error: String(err) });
             throw err;
         }
     },
@@ -216,10 +218,10 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
             const serverUrl = "api/v1/test-suites/generate_tests/";
             const body = processParamsForAPI(transport, {...params, description});
             const response = await transport.post<E2eTestSuite>(serverUrl, body, undefined, false);
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error creating E2E test suite:", err);
+            log.error('Error creating E2E test suite', { error: String(err) });
             return null;
         }
     },
@@ -228,10 +230,10 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
         try {
             const serverUrl = "api/v1/test-suites/";
             const response = await transport.get<PaginatedResponse<E2eTestSuite>>(serverUrl, { ...params }, true);
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error listing E2E test suites:", err);
+            log.error('Error listing E2E test suites', { error: String(err) });
             return null;
         }
     },
@@ -243,10 +245,10 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
         try {
             const serverUrl = `api/v1/test-suites/${uuid}/`;
             const response = await transport.get<E2eTestSuite>(serverUrl, { ...params });
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error fetching E2E test suite:", err);
+            log.error('Error fetching E2E test suite', { error: String(err) });
             return null;
         }
     },
@@ -258,10 +260,10 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
         try {
             const serverUrl = `api/v1/test-suites/${uuid}/run/`;
             const response = await transport.post<E2eTestSuite>(serverUrl, { ...params });
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error running E2E test suite:", err);
+            log.error('Error running E2E test suite', { error: String(err) });
             return null;
         }
     },
@@ -278,10 +280,10 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
             const serverUrl = "api/v1/commit-suites/";
             const body = processParamsForAPI(transport, {...params, description});
             const response = await transport.post<E2eTestCommitSuite>(serverUrl, body, undefined, false);
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error creating E2E commit suite:", err);
+            log.error('Error creating E2E commit suite', { error: String(err) });
             return null;
         }
     },
@@ -296,10 +298,10 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
         try {
             const serverUrl = `api/v1/commit-suites/${uuid}/run/`;
             const response = await transport.post<E2eTestCommitSuite>(serverUrl, { ...params });
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error running E2E commit suite:", err);
+            log.error('Error running E2E commit suite', { error: String(err) });
             return null;
         }
     },
@@ -315,13 +317,12 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
         try {
             const serverUrl = `api/v1/commit-suites/${uuid}/`;
             const response = await transport.get<E2eTestCommitSuite>(serverUrl, { ...params });    
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err: any) {
-            console.error("Error fetching E2E commit suite:", err);
-            console.error("Error details:", {
+            log.error('Error fetching E2E commit suite', { 
+                error: String(err),
                 status: err.response?.status,
-                data: err.response?.data,
                 message: err.message
             });
             return null;
@@ -332,10 +333,10 @@ export const createCLIE2esService = (transport: CLIContextTransport): CLIE2esSer
         try {
             const serverUrl = "api/v1/commit-suites/";
             const response = await transport.get<PaginatedResponse<E2eTestCommitSuite>>(serverUrl, { ...params }, true);
-            console.log("Raw API response for commit suites:", response);
+            log.debug("API response for commit suites", response);
             return response;
         } catch (err) {
-            console.error("Error listing E2E commit suites:", err);
+            log.error("Error listing E2E commit suites", err);
             return null;
         }
     },

@@ -1,8 +1,7 @@
 import { TunnelManager, TunnelConfig, TunnelInfo } from './tunnel-manager';
 import { ServerManager, ServerConfig } from './server-manager';
 import { TestManager, TestResult } from './test-manager';
-import chalk from 'chalk';
-import ora, { Ora } from 'ora';
+import { systemLogger } from '../util/system-logger';
 
 export interface WorkflowConfig {
   server: ServerConfig;
@@ -32,14 +31,16 @@ export interface WorkflowOptions {
   ngrokAuthToken?: string | undefined;
   baseDomain?: string | undefined;
   verbose?: boolean | undefined;
+  devMode?: boolean | undefined;
 }
 
 export class WorkflowOrchestrator {
   private tunnelManager: TunnelManager;
   private serverManager: ServerManager;
   private testManager?: TestManager;
-  private spinner?: Ora | undefined;
+  // Spinner handling is now managed by UserLogger
   private verbose: boolean;
+  private devMode: boolean;
 
   constructor(options: WorkflowOptions = {}) {
     this.tunnelManager = new TunnelManager({
@@ -53,6 +54,7 @@ export class WorkflowOrchestrator {
     });
 
     this.verbose = options.verbose || false;
+    this.devMode = options.devMode || false;
   }
 
   async executeWorkflow(config: WorkflowConfig): Promise<WorkflowResult> {
@@ -60,10 +62,13 @@ export class WorkflowOrchestrator {
     let serverStarted = false;
 
     try {
-      this.log('Starting DebuggAI workflow...', 'info');
-      this.spinner = ora('Initializing workflow...').start();
+      systemLogger.debug('Starting DebuggAI workflow');
+      
+      // Start user-facing progress spinner
+      systemLogger.info('Initializing workflow', { category: 'workflow' });
 
-      this.spinner.text = 'Starting application server...';
+      systemLogger.info('Starting application server', { category: 'workflow' });
+      systemLogger.debug('Starting application server');
       serverStarted = await this.serverManager.startServer('main', config.server);
       
       if (!serverStarted) {
@@ -71,35 +76,52 @@ export class WorkflowOrchestrator {
       }
 
       const serverUrl = this.serverManager.getServerUrl('main');
-      this.log(`Server started successfully at ${serverUrl}`, 'success');
+      systemLogger.debug('Server started successfully', { details: { serverUrl } });
 
-      this.spinner.text = 'Waiting for server to be ready...';
+      systemLogger.info('Waiting for server to be ready', { category: 'workflow' });
+      systemLogger.debug('Waiting for server to be ready');
       const serverReady = await this.serverManager.waitForServer('main', 30000);
       
       if (!serverReady) {
         throw new Error('Server failed to become ready');
       }
 
-      this.spinner.text = 'Creating ngrok tunnel...';
+      systemLogger.info('Creating ngrok tunnel', { category: 'workflow' });
+      systemLogger.debug('Creating ngrok tunnel', { category: 'tunnel' });
+      
+      // Log tunnel configuration details
+      const targetDomain = config.tunnel.customDomain || 
+        (config.tunnel.subdomain ? `${config.tunnel.subdomain}.ngrok.debugg.ai` : undefined);
+      
+      systemLogger.debug('Setting up tunnel', { category: 'tunnel', details: { port: config.tunnel.port, targetDomain } });
+      
       const tunnelInfo = await this.tunnelManager.createTunnel(config.tunnel);
       tunnelUuid = tunnelInfo.uuid;
       
-      this.log(`Tunnel created: ${tunnelInfo.url} -> localhost:${config.tunnel.port}`, 'success');
+      systemLogger.tunnel.connected(tunnelInfo.url);
 
-      this.spinner.text = 'Verifying tunnel connectivity...';
+      systemLogger.info('Verifying tunnel connectivity', { category: 'workflow' });
+      systemLogger.debug('Testing connectivity', { details: { url: tunnelInfo.url } });
+      
       const tunnelReady = await this.verifyTunnelConnectivity(tunnelInfo.url, 30000);
       
       if (!tunnelReady) {
+        systemLogger.error('Tunnel connectivity verification failed', { category: 'tunnel', details: { url: tunnelInfo.url } });
+        systemLogger.error('Tunnel connectivity verification failed');
         throw new Error('Tunnel connectivity verification failed');
       }
+      
+      systemLogger.debug('Tunnel is ready and accessible', { details: { url: tunnelInfo.url } });
 
-      this.spinner.text = 'Initializing test manager...';
+      systemLogger.info('Initializing test manager', { category: 'workflow' });
+      systemLogger.debug('Initializing test manager');
       this.testManager = new TestManager({
         ...config.test,
         waitForServer: false
       });
 
-      this.spinner.text = 'Running DebuggAI tests...';
+      systemLogger.info('Running DebuggAI tests', { category: 'workflow' });
+      systemLogger.debug('Running DebuggAI tests');
       const testResult = await this.runTestsWithTunnel(tunnelInfo.url);
 
       const shouldCleanup = config.cleanup?.onSuccess !== false;
@@ -107,7 +129,7 @@ export class WorkflowOrchestrator {
         await this.cleanup(tunnelUuid, true);
       }
 
-      this.spinner.succeed('Workflow completed successfully!');
+      systemLogger.success('Workflow completed successfully!');
       
       const result: WorkflowResult = {
         success: true,
@@ -123,11 +145,8 @@ export class WorkflowOrchestrator {
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-      this.log(`Workflow failed: ${errorMsg}`, 'error');
-      
-      if (this.spinner) {
-        this.spinner.fail(`Workflow failed: ${errorMsg}`);
-      }
+      systemLogger.error('Workflow failed', { details: { error: errorMsg } });
+      systemLogger.error(`Workflow failed: ${errorMsg}`);
 
       const shouldCleanup = config.cleanup?.onError !== false;
       if (shouldCleanup) {
@@ -139,7 +158,7 @@ export class WorkflowOrchestrator {
         error: errorMsg
       };
     } finally {
-      this.spinner = undefined;
+      // Spinner cleanup is handled by UserLogger
     }
   }
 
@@ -163,6 +182,7 @@ export class WorkflowOrchestrator {
 
   async createTunnel(config: TunnelConfig): Promise<{ success: boolean; tunnelInfo?: TunnelInfo; error?: string }> {
     try {
+      systemLogger.debug('Creating tunnel with provided configuration', { category: 'tunnel' });
       const tunnelInfo = await this.tunnelManager.createTunnel(config);
       return { success: true, tunnelInfo };
     } catch (error) {
@@ -242,21 +262,33 @@ export class WorkflowOrchestrator {
   private async verifyTunnelConnectivity(tunnelUrl: string, timeout: number = 30000): Promise<boolean> {
     const startTime = Date.now();
     const pollInterval = 2000;
+    let attemptCount = 0;
+
+    systemLogger.debug('Starting connectivity checks', { details: { url: tunnelUrl } });
 
     while (Date.now() - startTime < timeout) {
+      attemptCount++;
+      const elapsed = Date.now() - startTime;
+      
       try {
+        systemLogger.debug('Connectivity attempt', { details: { attempt: attemptCount, elapsed } });
+        
         const response = await fetch(tunnelUrl, {
           method: 'HEAD',
           signal: AbortSignal.timeout(5000)
         });
 
         if (response.ok || response.status === 404) {
+          systemLogger.debug('Tunnel connectivity verified', { details: { status: response.status, attempts: attemptCount, elapsed } });
           return true;
+        } else {
+          systemLogger.debug('Tunnel responded with status', { details: { status: response.status } });
         }
       } catch (error) {
-        this.log(`Tunnel connectivity check failed: ${error}`, 'warn');
+        systemLogger.debug('Connectivity attempt failed, retrying', { details: { attempt: attemptCount, elapsed, timeout } });
         // If fetch fails, break early to avoid long timeouts in tests
         if (process.env.NODE_ENV === 'test' || process.env.JEST_WORKER_ID) {
+          systemLogger.debug('Test environment detected - breaking early from connectivity checks');
           return false;
         }
       }
@@ -264,26 +296,35 @@ export class WorkflowOrchestrator {
       await new Promise(resolve => setTimeout(resolve, pollInterval));
     }
 
+    systemLogger.debug('Tunnel connectivity verification timed out', { details: { attempts: attemptCount, timeout } });
     return false;
   }
 
   async cleanup(tunnelUuid?: string, serverStarted: boolean = false): Promise<void> {
-    this.log('Starting cleanup...', 'info');
+    systemLogger.debug('Starting cleanup');
 
     const cleanupPromises: Promise<void>[] = [];
 
     // Safely handle tunnel cleanup
     if (tunnelUuid) {
+      systemLogger.debug('Cleaning up tunnel', { details: { uuid: tunnelUuid } });
       const tunnelCleanup = this.tunnelManager.disconnectTunnel(tunnelUuid)
+        .then(() => {
+          systemLogger.tunnel.disconnected(`Tunnel ${tunnelUuid}`);
+        })
         .catch(error => {
-          this.log(`Failed to disconnect tunnel: ${error}`, 'warn');
+          systemLogger.debug('Failed to disconnect tunnel', { details: { uuid: tunnelUuid, error } });
           return Promise.resolve();
         });
       cleanupPromises.push(tunnelCleanup);
     } else {
+      systemLogger.debug('Cleaning up all active tunnels');
       const allTunnelCleanup = this.tunnelManager.disconnectAll()
+        .then(() => {
+          systemLogger.debug('All tunnels disconnected successfully');
+        })
         .catch(error => {
-          this.log(`Failed to disconnect all tunnels: ${error}`, 'warn');
+          systemLogger.debug('Failed to disconnect all tunnels', { details: { error } });
           return Promise.resolve();
         });
       cleanupPromises.push(allTunnelCleanup);
@@ -293,7 +334,7 @@ export class WorkflowOrchestrator {
     if (serverStarted) {
       const serverCleanup = this.serverManager.stopAllServers()
         .catch(error => {
-          this.log(`Failed to stop servers: ${error}`, 'warn');
+          systemLogger.debug('Failed to stop servers', { details: { error } });
           return Promise.resolve();
         });
       cleanupPromises.push(serverCleanup);
@@ -301,9 +342,9 @@ export class WorkflowOrchestrator {
 
     try {
       await Promise.all(cleanupPromises);
-      this.log('Cleanup completed', 'success');
+      systemLogger.debug('Cleanup completed');
     } catch (error) {
-      this.log(`Cleanup encountered errors: ${error}`, 'warn');
+      systemLogger.debug('Cleanup encountered errors', { details: { error } });
     }
   }
 
@@ -317,23 +358,7 @@ export class WorkflowOrchestrator {
     };
   }
 
-  private log(message: string, level: 'info' | 'success' | 'warn' | 'error' = 'info'): void {
-    if (!this.verbose) return;
-
-    switch (level) {
-      case 'success':
-        console.log(chalk.green(`✓ ${message}`));
-        break;
-      case 'warn':
-        console.log(chalk.yellow(`⚠ ${message}`));
-        break;
-      case 'error':
-        console.log(chalk.red(`✗ ${message}`));
-        break;
-      default:
-        console.log(chalk.blue(`ℹ ${message}`));
-    }
-  }
+  // Logging is now handled by systemLogger
 
   async healthCheck(): Promise<{
     tunnelManager: boolean;

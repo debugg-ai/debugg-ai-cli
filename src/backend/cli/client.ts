@@ -3,6 +3,7 @@ import { CLITransport } from './transport';
 import { CLIContextProvider, CLIContextTransport } from './context';
 import { createCLIE2esService, CLIE2esService } from './services/e2es';
 import { createCLIUsersService, CLIUsersService } from './services/users';
+import { log } from '../../util/logging';
 
 export interface CLIClientConfig {
     apiKey: string;
@@ -51,7 +52,7 @@ export class CLIBackendClient {
     async initialize(): Promise<void> {
         if (this.initialized) return;
         
-        console.log('Initializing CLI Backend Client...');
+        log.info('Initializing CLI Backend Client');
         
         // Initialize context provider to gather git info
         await this.contextProvider.initialize();
@@ -63,7 +64,7 @@ export class CLIBackendClient {
         }
         
         this.initialized = true;
-        console.log('CLI Backend Client initialized successfully');
+        log.success('CLI Backend Client initialized');
     }
 
     /**
@@ -145,6 +146,7 @@ export class CLIBackendClient {
             absPath?: string;
         }>;
         testDescription: string;
+        key?: string; // Tunnel UUID for custom endpoints (e.g., <uuid>.debugg.ai)
         publicUrl?: string;
         testEnvironment?: {
             url: string;
@@ -153,15 +155,15 @@ export class CLIBackendClient {
             metadata?: Record<string, any>;
         };
         context?: Record<string, any>;
-        key?: string; // Tunnel UUID for custom endpoints (e.g., <uuid>.debugg.ai)
     }): Promise<{ success: boolean; testSuiteUuid?: string; tunnelKey?: string; error?: string }> {
         try {
             await this.ensureInitialized();
             
-            console.log('Creating commit test suite with backend services...');
+            log.info('Creating commit test suite');
             
             // Use the proven backend service to create commit suite
             const commitSuite = await this.e2es.createE2eCommitSuite(request.testDescription, {
+                key: request.key, // Tunnel UUID for custom endpoints
                 repoName: request.repoName,
                 repoPath: request.repoPath,
                 branchName: request.branchName,
@@ -169,7 +171,6 @@ export class CLIBackendClient {
                 workingChanges: request.workingChanges,
                 publicUrl: request.publicUrl,
                 testEnvironment: request.testEnvironment,
-                key: request.key, // Tunnel UUID for custom endpoints
                 ...request.context
             });
 
@@ -186,7 +187,7 @@ export class CLIBackendClient {
                 };
             }
         } catch (error) {
-            console.error('Failed to create commit test suite:', error);
+            log.error('Failed to create commit test suite', error);
             return {
                 success: false,
                 error: error instanceof Error ? error.message : 'Unknown error'
@@ -200,9 +201,23 @@ export class CLIBackendClient {
     async getCommitTestSuiteStatus(suiteUuid: string): Promise<any> {
         try {
             await this.ensureInitialized();
-            return await this.e2es.getE2eCommitSuite(suiteUuid);
+            const result = await this.e2es.getE2eCommitSuite(suiteUuid);
+            
+            if (!result) {
+                log.warn(`No data returned for commit test suite ${suiteUuid}`);
+                return null;
+            }
+            
+            // Debug log to help troubleshoot status issues
+            log.debug(`Status check for ${suiteUuid}`, {
+                runStatus: result.runStatus,
+                testsCount: result.tests?.length || 0,
+                hasTests: !!result.tests
+            });
+            
+            return result;
         } catch (error) {
-            console.error(`Failed to get commit test suite status for ${suiteUuid}:`, error);
+            log.error(`Failed to get commit test suite status for ${suiteUuid}`, error);
             return null;
         }
     }
@@ -222,13 +237,13 @@ export class CLIBackendClient {
         const pollInterval = options.pollInterval || 5000; // 5 seconds
         const startTime = Date.now();
 
-        console.log(`Waiting for commit test suite ${suiteUuid} to complete...`);
+        log.progress(`Waiting for test suite to complete`);
 
         while (Date.now() - startTime < maxWaitTime) {
             const suite = await this.getCommitTestSuiteStatus(suiteUuid);
             
             if (!suite) {
-                console.error('Failed to get test suite status');
+                log.error('Failed to get test suite status - received null/undefined response');
                 return null;
             }
 
@@ -236,41 +251,44 @@ export class CLIBackendClient {
                 options.onProgress(suite);
             }
 
-            if (suite.status === 'completed' || suite.status === 'failed') {
-                console.log(`Test suite ${suiteUuid} finished with status: ${suite.status}`);
+            // Backend uses 'runStatus' field for commit suites
+            const status = suite.runStatus;
+            
+            if (!status) {
+                log.error('Test suite response missing runStatus field', {
+                    runStatus: suite.runStatus,
+                    hasTests: !!suite.tests,
+                    testCount: suite.tests?.length || 0
+                });
+                // Continue polling in case it's a temporary issue
+            } else if (status === 'completed') {
+                log.success(`Test suite completed`);
                 return suite;
             }
 
-            console.log(`Test suite status: ${suite.status}, waiting...`);
+            log.debug(`Test suite status: ${status || 'undefined'}, waiting...`);
             await new Promise(resolve => setTimeout(resolve, pollInterval));
         }
 
-        console.error(`Test suite ${suiteUuid} timed out after ${maxWaitTime}ms`);
+        log.error(`Test suite timed out after ${maxWaitTime}ms`);
         return null;
     }
 
     /**
      * Download artifact (for test scripts, recordings, etc.)
+     * Uses the proven redirect handling logic from the IDE
      */
-    async downloadArtifact(url: string): Promise<Buffer | null> {
-        try {
-            // Use the transport to download binary data
-            const axios = (this.transport as any).axios;
-            if (!axios) {
-                throw new Error('Axios instance not available');
-            }
+    async downloadArtifact(url: string, originalBaseUrl?: string): Promise<Buffer | null> {
+        const { downloadArtifactToBuffer } = await import('../../util/artifact-downloader');
+        return downloadArtifactToBuffer(url, originalBaseUrl);
+    }
 
-            const response = await axios.get(url, {
-                responseType: 'arraybuffer',
-                headers: {
-                    'Accept': '*/*'
-                }
-            });
-            
-            return Buffer.from(response.data);
-        } catch (error) {
-            console.error(`Failed to download artifact from ${url}:`, error);
-            return null;
-        }
+    /**
+     * Download artifact directly to file (more efficient for large files)
+     * Uses the proven redirect handling logic from the IDE
+     */
+    async downloadArtifactToFile(url: string, filePath: string, originalBaseUrl?: string): Promise<boolean> {
+        const { downloadArtifactToFile } = await import('../../util/artifact-downloader');
+        return downloadArtifactToFile(url, filePath, originalBaseUrl);
     }
 }

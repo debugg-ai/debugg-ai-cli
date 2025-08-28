@@ -2,6 +2,9 @@ import { SimpleGit, simpleGit } from 'simple-git';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import { execSync } from 'child_process';
+import { log } from '../util/logging';
+import { ContextExtractor } from '../repo-handlers/analyzers/ContextExtractor';
+import { CodebaseContext } from '../repo-handlers/types/codebaseContext';
 
 export interface WorkingChange {
   status: string;
@@ -41,6 +44,7 @@ export class GitAnalyzer {
   private git: SimpleGit;
   private repoPath: string;
   private ignoredFolders: string[];
+  private contextExtractor: ContextExtractor;
 
   constructor(options: GitAnalyzerOptions) {
     this.repoPath = options.repoPath;
@@ -56,6 +60,187 @@ export class GitAnalyzer {
     ];
     
     this.git = simpleGit(this.repoPath);
+    
+    // Initialize context extractor for enhanced analysis
+    this.contextExtractor = new ContextExtractor({
+      maxFileSize: 100000,
+      maxParentFiles: 3,
+      maxRoutingFiles: 3,
+      maxConfigFiles: 2,
+      timeoutMs: 10000
+    });
+  }
+
+  /**
+   * Enhanced file filtering - excludes non-code project files
+   * Only includes files that actually affect the UI/application behavior
+   */
+  private isUIRelevantFile(filePath: string): boolean {
+    const fileName = path.basename(filePath).toLowerCase();
+    const extension = path.extname(filePath).toLowerCase();
+    const fullPathLower = filePath.toLowerCase();
+    
+    // Exclude lock files
+    if (fileName.includes('lock') || fileName.endsWith('.lock')) {
+      return false;
+    }
+    
+    // Exclude git-related files
+    if (fileName.startsWith('.git')) {
+      return false;
+    }
+    
+    // Exclude linting and formatting configuration files
+    const lintingConfigFiles = [
+      '.eslintrc', '.eslintrc.js', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml',
+      '.prettierrc', '.prettierrc.js', '.prettierrc.json', '.prettierrc.yml', '.prettierrc.yaml',
+      '.stylelintrc', '.stylelintrc.js', '.stylelintrc.json', '.stylelintrc.yml',
+      '.jshintrc', '.jscsrc', 'tslint.json', '.editorconfig'
+    ];
+    
+    if (lintingConfigFiles.includes(fileName)) {
+      return false;
+    }
+    
+    // Exclude testing configuration files (not the actual tests)
+    const testConfigFiles = [
+      'jest.config.js', 'jest.config.json', 'jest.config.ts',
+      'cypress.config.js', 'cypress.config.ts', 'cypress.json',
+      'playwright.config.js', 'playwright.config.ts',
+      'karma.conf.js', 'protractor.conf.js', 'webdriver.conf.js'
+    ];
+    
+    if (testConfigFiles.includes(fileName)) {
+      return false;
+    }
+    
+    // Check if it's a configuration file that DOES affect the application first
+    const relevantConfigFiles = [
+      'package.json', // Contains dependencies and scripts
+      'tsconfig.json', 'jsconfig.json', // TypeScript/JavaScript config affects compilation
+      'next.config.js', 'nuxt.config.js', 'nuxt.config.ts', // Framework configs
+      'svelte.config.js', 'vite.config.js', 'vite.config.ts' // Framework configs
+    ];
+    
+    if (relevantConfigFiles.includes(fileName)) {
+      return true; // Return early for relevant configs
+    }
+    
+    // Exclude build tool configuration files (after checking for relevant ones)
+    const buildConfigFiles = [
+      'webpack.config.js', 'webpack.config.ts', 'webpack.dev.js', 'webpack.prod.js',
+      'rollup.config.js', 'rollup.config.ts',
+      'gulpfile.js', 'gruntfile.js',
+      'babel.config.js', 'babel.config.json', '.babelrc', '.babelrc.js', '.babelrc.json',
+      'postcss.config.js', 'tailwind.config.js', 'tailwind.config.ts'
+    ];
+    
+    if (buildConfigFiles.includes(fileName)) {
+      return false;
+    }
+    
+    // Exclude package manager and environment files
+    const packageConfigFiles = [
+      '.npmrc', '.yarnrc', '.yarnrc.yml', 'yarn.lock', 'package-lock.json', 'pnpm-lock.yaml',
+      '.nvmrc', '.node-version', '.ruby-version', '.python-version',
+      '.env.example', '.env.local', '.env.development', '.env.production', '.env.test'
+    ];
+    
+    if (packageConfigFiles.includes(fileName)) {
+      return false;
+    }
+    
+    // Exclude documentation and meta files
+    const docFiles = [
+      'readme.md', 'license', 'license.md', 'license.txt',
+      'changelog.md', 'changelog.txt', 'history.md',
+      'contributing.md', 'code_of_conduct.md', 'security.md',
+      'authors.md', 'contributors.md', 'maintainers.md'
+    ];
+    
+    if (docFiles.includes(fileName)) {
+      return false;
+    }
+    
+    // Exclude Docker and deployment files
+    const deploymentFiles = [
+      'dockerfile', 'docker-compose.yml', 'docker-compose.yaml',
+      '.dockerignore', 'docker-compose.dev.yml', 'docker-compose.prod.yml',
+      'vercel.json', 'netlify.toml', 'now.json'
+    ];
+    
+    if (deploymentFiles.includes(fileName)) {
+      return false;
+    }
+    
+    // Exclude CI/CD configuration files
+    const ciConfigPatterns = [
+      '.travis.yml', '.circleci', '.github/workflows', '.github/actions',
+      'appveyor.yml', 'azure-pipelines', 'jenkins', 'codeship', 'wercker.yml',
+      '.gitlab-ci.yml', 'bitbucket-pipelines.yml'
+    ];
+    
+    if (ciConfigPatterns.some(pattern => fullPathLower.includes(pattern))) {
+      return false;
+    }
+    
+    // Exclude IDE and editor configuration files
+    const ideConfigPatterns = [
+      '.vscode', '.idea', '.sublime', '*.sublime-project', '*.sublime-workspace',
+      '.vs', '.vscode-test'
+    ];
+    
+    if (ideConfigPatterns.some(pattern => fullPathLower.includes(pattern))) {
+      return false;
+    }
+    
+    // Exclude binary and non-text files that aren't UI assets
+    const excludedBinaryExtensions = [
+      '.exe', '.dll', '.so', '.dylib', '.a', '.lib', '.jar', '.war', 
+      '.zip', '.tar', '.gz', '.rar', '.7z'
+    ];
+    
+    if (excludedBinaryExtensions.includes(extension)) {
+      return false;
+    }
+    
+    // Include only actual code and UI-relevant files
+    const codeExtensions = [
+      '.js', '.jsx', '.ts', '.tsx', '.vue', '.svelte',
+      '.html', '.htm', '.css', '.scss', '.sass', '.less', '.styl',
+      '.json', '.xml', '.yaml', '.yml', '.toml',
+      '.py', '.rb', '.java', '.cs', '.php', '.go', '.rs', '.cpp', '.c', '.h',
+      '.sql', '.graphql', '.gql',
+      '.md' // Only include .md files that aren't docs (like component docs)
+    ];
+    
+    const uiAssetExtensions = [
+      '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico',
+      '.woff', '.woff2', '.ttf', '.eot',
+      '.mp4', '.webm', '.ogg', '.mp3', '.wav'
+    ];
+    
+    // Check if it's a code file or UI asset
+    if (codeExtensions.includes(extension) || uiAssetExtensions.includes(extension)) {
+      // Exclude markdown files that are clearly documentation
+      if (extension === '.md') {
+        const docMarkdownPatterns = [
+          'readme', 'license', 'changelog', 'contributing', 'code_of_conduct',
+          'security', 'authors', 'contributors', 'maintainers', 'history'
+        ];
+        const baseNameWithoutExt = path.basename(filePath, extension).toLowerCase();
+        
+        if (docMarkdownPatterns.some(pattern => baseNameWithoutExt.includes(pattern))) {
+          return false;
+        }
+      }
+      
+      return true;
+    }
+    
+    
+    // If we get here, it's likely a project file we don't need for UI testing
+    return false;
   }
 
   /**
@@ -82,7 +267,7 @@ export class GitAnalyzer {
         commitHash: commitHash.trim()
       };
     } catch (error) {
-      console.warn('Failed to get branch info, using defaults:', error);
+      log.git.debug('Failed to get branch info, using defaults', { error: String(error) });
       return {
         branch: 'main',
         commitHash: 'unknown'
@@ -113,7 +298,7 @@ export class GitAnalyzer {
             diff
           });
         } catch (error) {
-          console.warn(`Failed to get diff for ${file}:`, error);
+          log.git.debug(`Failed to get diff for ${file}`, { error: String(error) });
           changes.push({
             status: 'M',
             file
@@ -133,7 +318,7 @@ export class GitAnalyzer {
             diff
           });
         } catch (error) {
-          console.warn(`Failed to get staged diff for ${file}:`, error);
+          log.git.debug(`Failed to get staged diff for ${file}`, { error: String(error) });
           changes.push({
             status: 'A',
             file
@@ -154,7 +339,7 @@ export class GitAnalyzer {
             diff: content
           });
         } catch (error) {
-          console.warn(`Failed to read new file ${file}:`, error);
+          log.git.debug(`Failed to read new file ${file}`, { error: String(error) });
           changes.push({
             status: '??',
             file
@@ -174,7 +359,7 @@ export class GitAnalyzer {
       }
 
     } catch (error) {
-      console.error('Failed to get working changes:', error);
+      log.error('Failed to get working changes', { error: String(error) });
     }
 
     return {
@@ -219,7 +404,7 @@ export class GitAnalyzer {
             diff
           });
         } catch (error) {
-          console.warn(`Failed to get diff for ${file.file}:`, error);
+          log.git.debug(`Failed to get diff for ${file.file}`, { error: String(error) });
           changes.push({
             status,
             file: file.file
@@ -228,7 +413,7 @@ export class GitAnalyzer {
       }
 
     } catch (error) {
-      console.error(`Failed to get commit changes for ${commitHash}:`, error);
+      log.error(`Failed to get commit changes for ${commitHash}`, { error: String(error) });
     }
 
     return {
@@ -248,7 +433,7 @@ export class GitAnalyzer {
       const log = await this.git.log(['--max-count=50', range]);
       return log.all.map(commit => commit.hash);
     } catch (error) {
-      console.error(`Failed to get commits from range ${range}:`, error);
+      log.error(`Failed to get commits from range ${range}`, { error: String(error) });
       return [];
     }
   }
@@ -265,7 +450,7 @@ export class GitAnalyzer {
       
       return log.all.map(commit => commit.hash);
     } catch (error) {
-      console.error(`Failed to get commits since ${since}:`, error);
+      log.error(`Failed to get commits since ${since}`, { error: String(error) });
       return [];
     }
   }
@@ -281,7 +466,7 @@ export class GitAnalyzer {
       
       return log.all.map(commit => commit.hash);
     } catch (error) {
-      console.error(`Failed to get last ${count} commits:`, error);
+      log.error(`Failed to get last ${count} commits`, { error: String(error) });
       return [];
     }
   }
@@ -378,7 +563,7 @@ export class GitAnalyzer {
       };
 
     } catch (error) {
-      console.error(`Failed to get commit info for ${commitHash}:`, error);
+      log.error(`Failed to get commit info for ${commitHash}`, { error: String(error) });
       return null;
     }
   }
@@ -390,7 +575,7 @@ export class GitAnalyzer {
     try {
       return await this.git.revparse(['HEAD']);
     } catch (error) {
-      console.error('Failed to get latest commit hash:', error);
+      log.error('Failed to get latest commit hash', { error: String(error) });
       return 'unknown';
     }
   }
@@ -410,7 +595,7 @@ export class GitAnalyzer {
         }
       }
     } catch (error) {
-      console.warn('Failed to get repo name from git remote:', error);
+      log.git.debug('Failed to get repo name from git remote', { error: String(error) });
     }
     
     // Fallback to directory name
@@ -466,12 +651,20 @@ export class GitAnalyzer {
   }
 
   /**
-   * Check if we should ignore a file based on ignored folders
+   * Check if we should ignore a file based on ignored folders and UI relevance
    */
   private shouldIgnoreFile(filePath: string): boolean {
-    return this.ignoredFolders.some(folder => 
+    // Check ignored folders
+    const isInIgnoredFolder = this.ignoredFolders.some(folder => 
       filePath.startsWith(folder + '/') || filePath === folder
     );
+    
+    if (isInIgnoredFolder) {
+      return true;
+    }
+    
+    // Check if file is UI relevant (excludes .lock, .gitignore, etc.)
+    return !this.isUIRelevantFile(filePath);
   }
 
   /**
@@ -499,7 +692,7 @@ export class GitAnalyzer {
 
       return commits;
     } catch (error) {
-      console.error('Failed to get recent commits:', error);
+      log.error('Failed to get recent commits', { error: String(error) });
       return [];
     }
   }
@@ -514,6 +707,58 @@ export class GitAnalyzer {
     } catch (error) {
       return false;
     }
+  }
+
+  /**
+   * Get enhanced codebase context for better test generation
+   * Integrates the proven repo-handlers workflow
+   */
+  async getEnhancedContext(workingChanges: WorkingChanges): Promise<CodebaseContext | null> {
+    try {
+      const repoName = this.getRepoName();
+      
+      // Use the context extractor to get comprehensive analysis
+      const context = await this.contextExtractor.extractCodebaseContext(
+        this.repoPath,
+        repoName,
+        workingChanges,
+        workingChanges.branchInfo
+      );
+      
+      return context;
+    } catch (error) {
+      log.error('Failed to extract enhanced context', { error: String(error) });
+      return null;
+    }
+  }
+
+  /**
+   * Get minimal context for performance-critical scenarios
+   */
+  async getMinimalContext(workingChanges: WorkingChanges): Promise<CodebaseContext | null> {
+    try {
+      const repoName = this.getRepoName();
+      
+      // Use the minimal context extraction for faster results
+      const context = await this.contextExtractor.extractMinimalContext(
+        this.repoPath,
+        repoName,
+        workingChanges,
+        workingChanges.branchInfo
+      );
+      
+      return context;
+    } catch (error) {
+      log.error('Failed to extract minimal context', { error: String(error) });
+      return null;
+    }
+  }
+
+  /**
+   * Get context extraction statistics
+   */
+  getContextStats(context: CodebaseContext | null) {
+    return this.contextExtractor.getExtractionStats(context);
   }
 
   /**
@@ -549,7 +794,7 @@ export class GitAnalyzer {
             diff
           });
         } catch (error) {
-          console.warn(`Failed to get diff for ${file.file}:`, error);
+          log.git.debug(`Failed to get diff for ${file.file}`, { error: String(error) });
           changes.push({
             status,
             file: file.file
@@ -558,7 +803,7 @@ export class GitAnalyzer {
       }
 
     } catch (error) {
-      console.error(`Failed to get changes between ${from} and ${to}:`, error);
+      log.error(`Failed to get changes between ${from} and ${to}`, { error: String(error) });
     }
 
     return changes;

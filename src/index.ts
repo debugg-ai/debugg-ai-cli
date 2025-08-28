@@ -5,21 +5,12 @@
  * For CLI usage, use the `debugg-ai` command after installing the package.
  */
 
-export { DebuggAIClient } from './lib/api-client';
 export { CLIBackendClient } from './backend/cli/client';
 export { GitAnalyzer } from './lib/git-analyzer';
 export { TestManager } from './lib/test-manager';
 export { TunnelManager } from './lib/tunnel-manager';
 export { ServerManager } from './lib/server-manager';
 export { WorkflowOrchestrator } from './lib/workflow-orchestrator';
-
-export type {
-  E2eTest,
-  E2eTestSuite,
-  CommitTestRequest,
-  CommitTestResponse,
-  ApiClientConfig
-} from './lib/api-client';
 
 export type {
   CLIClientConfig

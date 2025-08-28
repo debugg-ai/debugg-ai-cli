@@ -571,7 +571,7 @@ describe('GitAnalyzer', () => {
         { path: 'dist/build.js', shouldIgnore: true },
         { path: '.git/config', shouldIgnore: true },
         { path: 'src/file.ts', shouldIgnore: false },
-        { path: 'README.md', shouldIgnore: false }
+        { path: 'src/components/Button.tsx', shouldIgnore: false }
       ];
 
       testCases.forEach(({ path, shouldIgnore }) => {
@@ -583,6 +583,209 @@ describe('GitAnalyzer', () => {
     it('should ignore exact folder matches', () => {
       const result = (analyzer as any).shouldIgnoreFile('node_modules');
       expect(result).toBe(true);
+    });
+
+    it('should ignore non-UI relevant files', () => {
+      const nonUIFiles = [
+        // Lock files
+        'package-lock.json',
+        'yarn.lock', 
+        'pnpm-lock.yaml',
+        // Git files
+        '.gitignore',
+        '.gitattributes',
+        // Linting configs
+        '.eslintrc.js',
+        '.prettierrc.json',
+        '.stylelintrc',
+        // Build configs
+        'webpack.config.js',
+        'babel.config.json',
+        'rollup.config.ts',
+        // Test configs
+        'jest.config.js',
+        'cypress.config.ts',
+        // Docker
+        'dockerfile',
+        '.dockerignore',
+        'docker-compose.yml',
+        // Environment
+        '.nvmrc',
+        '.env.example',
+        // Documentation
+        'README.md',
+        'LICENSE',
+        'CHANGELOG.md',
+        'CONTRIBUTING.md',
+        // CI/CD
+        '.travis.yml',
+        '.github/workflows/ci.yml',
+        '.gitlab-ci.yml',
+        // IDE configs
+        '.vscode/settings.json',
+        '.idea/workspace.xml'
+      ];
+
+      nonUIFiles.forEach(file => {
+        const result = (analyzer as any).shouldIgnoreFile(file);
+        expect(result).toBe(true);
+      });
+    });
+
+    it('should allow UI-relevant files', () => {
+      const uiRelevantFiles = [
+        // Code files
+        'src/components/Button.tsx',
+        'src/utils/helpers.js',
+        'src/api/users.ts',
+        'app.vue',
+        // Styles
+        'src/styles/main.css',
+        'styles/globals.scss',
+        // Templates/HTML
+        'public/index.html',
+        'src/templates/layout.html',
+        // Assets
+        'src/assets/logo.png',
+        'public/favicon.ico',
+        'assets/fonts/main.woff2',
+        // Relevant configs that affect the app
+        'package.json',
+        'tsconfig.json',
+        'next.config.js',
+        'vite.config.ts',
+        // Data files
+        'src/data/config.json',
+        'locales/en.yml',
+        // Component documentation
+        'src/components/Button.stories.md'
+      ];
+
+      uiRelevantFiles.forEach(file => {
+        const result = (analyzer as any).shouldIgnoreFile(file);
+        expect(result).toBe(false);
+      });
+    });
+  });
+
+  describe('isUIRelevantFile', () => {
+    it('should exclude linting configuration files', () => {
+      const lintingFiles = [
+        '.eslintrc',
+        '.eslintrc.js',
+        '.eslintrc.json',
+        '.prettierrc',
+        '.prettierrc.js',
+        '.stylelintrc.yml',
+        'tslint.json'
+      ];
+
+      lintingFiles.forEach(file => {
+        const result = (analyzer as any).isUIRelevantFile(file);
+        expect(result).toBe(false);
+      });
+    });
+
+    it('should exclude build tool configurations', () => {
+      const buildFiles = [
+        'webpack.config.js',
+        'rollup.config.ts',
+        'gulpfile.js',
+        'babel.config.json',
+        '.babelrc',
+        'postcss.config.js'
+      ];
+
+      buildFiles.forEach(file => {
+        const result = (analyzer as any).isUIRelevantFile(file);
+        expect(result).toBe(false);
+      });
+    });
+
+    it('should exclude test configuration files', () => {
+      const testConfigFiles = [
+        'jest.config.js',
+        'cypress.config.ts',
+        'playwright.config.js',
+        'karma.conf.js'
+      ];
+
+      testConfigFiles.forEach(file => {
+        const result = (analyzer as any).isUIRelevantFile(file);
+        expect(result).toBe(false);
+      });
+    });
+
+    it('should exclude documentation files', () => {
+      const docFiles = [
+        'README.md',
+        'CHANGELOG.md',
+        'LICENSE',
+        'CONTRIBUTING.md',
+        'CODE_OF_CONDUCT.md'
+      ];
+
+      docFiles.forEach(file => {
+        const result = (analyzer as any).isUIRelevantFile(file);
+        expect(result).toBe(false);
+      });
+    });
+
+    it('should include actual code files', () => {
+      const codeFiles = [
+        'src/components/Button.tsx',
+        'src/utils/helper.js',
+        'app.vue',
+        'styles/main.css',
+        'index.html',
+        'api/users.ts',
+        'script.py'
+      ];
+
+      codeFiles.forEach(file => {
+        const result = (analyzer as any).isUIRelevantFile(file);
+        expect(result).toBe(true);
+      });
+    });
+
+    it('should include UI assets', () => {
+      const assetFiles = [
+        'logo.png',
+        'icon.svg',
+        'background.jpg',
+        'font.woff2',
+        'video.mp4'
+      ];
+
+      assetFiles.forEach(file => {
+        const result = (analyzer as any).isUIRelevantFile(file);
+        expect(result).toBe(true);
+      });
+    });
+
+    it('should include relevant configuration files', () => {
+      const relevantConfigs = [
+        'package.json',
+        'tsconfig.json',
+        'next.config.js',
+        'vite.config.ts'
+      ];
+
+      relevantConfigs.forEach(file => {
+        const result = (analyzer as any).isUIRelevantFile(file);
+        expect(result).toBe(true);
+      });
+    });
+
+    it('should exclude component documentation markdown', () => {
+      const componentDocs = [
+        'src/components/Button.stories.md'
+      ];
+
+      componentDocs.forEach(file => {
+        const result = (analyzer as any).isUIRelevantFile(file);
+        expect(result).toBe(true); // Component stories are relevant for UI testing
+      });
     });
   });
 
@@ -678,6 +881,175 @@ describe('GitAnalyzer', () => {
       const result = await analyzer.getChangesBetween(fromRef, toRef);
 
       expect(result).toEqual([]);
+    });
+  });
+
+  describe('getEnhancedContext', () => {
+    let mockWorkingChanges: any;
+
+    beforeEach(() => {
+      mockWorkingChanges = {
+        changes: [
+          { status: 'M', file: 'src/Button.tsx', diff: 'button diff' },
+          { status: 'A', file: 'src/api/users.ts', diff: 'api diff' }
+        ],
+        branchInfo: {
+          branch: 'feature/test',
+          commitHash: 'abc123'
+        }
+      };
+    });
+
+    it('should extract enhanced context successfully', async () => {
+      // Mock the context extractor to return a successful result
+      const mockContext = {
+        commitHash: 'abc123',
+        commitMessage: 'Working changes on feature/test',
+        timestamp: '2023-01-01T00:00:00.000Z',
+        repositoryName: 'test-repo',
+        changedFiles: [],
+        parentComponents: [],
+        routingFiles: [],
+        configFiles: [],
+        componentHierarchy: [],
+        routeMapping: [],
+        totalContextFiles: 2,
+        totalContextSizeBytes: 1000,
+        analysisTimestamp: '2023-01-01T00:00:00.000Z',
+        architecturalPatterns: ['React'],
+        userJourneyMapping: [],
+        focusAreas: ['Component rendering']
+      };
+
+      jest.spyOn(analyzer['contextExtractor'], 'extractCodebaseContext')
+        .mockResolvedValue(mockContext);
+
+      const result = await analyzer.getEnhancedContext(mockWorkingChanges);
+
+      expect(result).toEqual(mockContext);
+      expect(analyzer['contextExtractor'].extractCodebaseContext)
+        .toHaveBeenCalledWith(
+          repoPath,
+          'repo',
+          mockWorkingChanges,
+          mockWorkingChanges.branchInfo
+        );
+    });
+
+    it('should return null on extraction error', async () => {
+      jest.spyOn(analyzer['contextExtractor'], 'extractCodebaseContext')
+        .mockRejectedValue(new Error('Extraction failed'));
+
+      const result = await analyzer.getEnhancedContext(mockWorkingChanges);
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('getMinimalContext', () => {
+    let mockWorkingChanges: any;
+
+    beforeEach(() => {
+      mockWorkingChanges = {
+        changes: [
+          { status: 'M', file: 'src/Button.tsx', diff: 'button diff' }
+        ],
+        branchInfo: {
+          branch: 'feature/test',
+          commitHash: 'abc123'
+        }
+      };
+    });
+
+    it('should extract minimal context successfully', async () => {
+      const mockContext = {
+        commitHash: 'abc123',
+        commitMessage: 'Minimal context for working changes on feature/test',
+        timestamp: '2023-01-01T00:00:00.000Z',
+        repositoryName: 'test-repo',
+        changedFiles: [],
+        parentComponents: [],
+        routingFiles: [],
+        configFiles: [],
+        componentHierarchy: [],
+        routeMapping: [],
+        totalContextFiles: 1,
+        totalContextSizeBytes: 500,
+        analysisTimestamp: '2023-01-01T00:00:00.000Z',
+        architecturalPatterns: ['React'],
+        userJourneyMapping: [],
+        focusAreas: ['Component rendering']
+      };
+
+      jest.spyOn(analyzer['contextExtractor'], 'extractMinimalContext')
+        .mockResolvedValue(mockContext);
+
+      const result = await analyzer.getMinimalContext(mockWorkingChanges);
+
+      expect(result).toEqual(mockContext);
+      expect(analyzer['contextExtractor'].extractMinimalContext)
+        .toHaveBeenCalledWith(
+          repoPath,
+          'repo',
+          mockWorkingChanges,
+          mockWorkingChanges.branchInfo
+        );
+    });
+
+    it('should return null on extraction error', async () => {
+      jest.spyOn(analyzer['contextExtractor'], 'extractMinimalContext')
+        .mockRejectedValue(new Error('Extraction failed'));
+
+      const result = await analyzer.getMinimalContext(mockWorkingChanges);
+
+      expect(result).toBeNull();
+    });
+  });
+
+  describe('getContextStats', () => {
+    it('should return stats for valid context', () => {
+      const mockContext = {
+        totalContextFiles: 5,
+        totalContextSizeBytes: 10240,
+        architecturalPatterns: ['React', 'Redux'],
+        focusAreas: ['Component rendering', 'State management']
+      };
+
+      jest.spyOn(analyzer['contextExtractor'], 'getExtractionStats')
+        .mockReturnValue({
+          filesAnalyzed: 5,
+          totalSizeKB: 10,
+          architecturalPatterns: 2,
+          focusAreas: 2
+        });
+
+      const result = analyzer.getContextStats(mockContext as any);
+
+      expect(result).toEqual({
+        filesAnalyzed: 5,
+        totalSizeKB: 10,
+        architecturalPatterns: 2,
+        focusAreas: 2
+      });
+    });
+
+    it('should return empty stats for null context', () => {
+      jest.spyOn(analyzer['contextExtractor'], 'getExtractionStats')
+        .mockReturnValue({
+          filesAnalyzed: 0,
+          totalSizeKB: 0,
+          architecturalPatterns: 0,
+          focusAreas: 0
+        });
+
+      const result = analyzer.getContextStats(null);
+
+      expect(result).toEqual({
+        filesAnalyzed: 0,
+        totalSizeKB: 0,
+        architecturalPatterns: 0,
+        focusAreas: 0
+      });
     });
   });
 });

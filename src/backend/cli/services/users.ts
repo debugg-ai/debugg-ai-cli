@@ -1,5 +1,7 @@
 // backend/cli/services/users.ts - CLI-adapted users service
 import { CLIContextTransport } from "../context";
+import { truncateForLogging } from "../transport";
+import { log } from "../../../util/logging";
 
 // Simplified user config for CLI - we don't need all IDE-specific settings
 export interface CLIUserConfig {
@@ -35,15 +37,14 @@ export const createCLIUsersService = (transport: CLIContextTransport): CLIUsersS
      */
     async getUserConfig(): Promise<CLIUserConfig | null> {
         try {
-            console.log("getUserConfig called");
-            console.log("Transport auth header:", transport.getTransport().getAuthorizationHeader?.());
+            log.debug('getUserConfig called');
             
             // Use simpler user endpoint that works with Token auth
             const serverUrl = "api/v1/users/me/";
             
             if (transport.getTransport().getAuthorizationHeader()) {
                 const response = await transport.get<CLIUserConfig>(serverUrl, {}, false);
-                console.log("Raw API response:", response);
+                log.debug("API response", truncateForLogging(response));
                 
                 // Enhance response with current repo context
                 const context = transport.getContextProvider().getContext();
@@ -62,11 +63,11 @@ export const createCLIUsersService = (transport: CLIContextTransport): CLIUsersS
                 
                 return response;
             } else {
-                console.log("Cannot call user config endpoint without auth header");
+                log.warn('Cannot call user config endpoint without auth header');
                 return null;
             }
         } catch (err) {
-            console.error("Error fetching user config:", err);
+            log.error('Error fetching user config', { error: String(err) });
             return null;
         }
     },
@@ -80,7 +81,7 @@ export const createCLIUsersService = (transport: CLIContextTransport): CLIUsersS
             const response = await transport.get<{ id?: string; email?: string }>(serverUrl, {}, false);
             return response;
         } catch (err) {
-            console.error("Error fetching current user:", err);
+            log.error('Error fetching current user', { error: String(err) });
             return null;
         }
     },

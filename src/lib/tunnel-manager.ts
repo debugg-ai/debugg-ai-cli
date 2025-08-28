@@ -1,3 +1,5 @@
+import { log } from '../util/logging';
+
 let ngrok: {
   connect: (options: { proto: string; addr: number; hostname?: string; authtoken: string }) => Promise<string>;
   disconnect: (url: string) => Promise<void>;
@@ -6,7 +8,7 @@ let ngrok: {
 try {
   ngrok = require('ngrok');
 } catch (error) {
-  console.warn('Warning: ngrok package not available. Tunnel functionality will be disabled.');
+  log.warn('ngrok package not available - tunnel functionality disabled');
 }
 import { v4 as uuidv4 } from 'uuid';
 
@@ -61,7 +63,20 @@ export class TunnelManager {
     const subdomain = config.subdomain || tunnelUuid;
     const customDomain = config.customDomain || `${subdomain}.${this.baseDomain}`;
 
+    const startTime = Date.now();
+    
+    log.info(`🌐 Creating ngrok tunnel for localhost:${config.port}`);
+    log.debug('Ngrok tunnel configuration', {
+      uuid: tunnelUuid,
+      subdomain,
+      targetDomain: customDomain,
+      port: config.port,
+      hasAuthToken: !!authToken,
+      authTokenSource: config.tunnelKey ? 'backend' : (config.authtoken ? 'config' : 'env')
+    });
+
     try {
+      log.info(`🔗 Attempting to connect to public domain: ${customDomain}`);
       const url = await ngrok.connect({
         proto: 'http',
         addr: config.port,
@@ -69,6 +84,7 @@ export class TunnelManager {
         authtoken: authToken
       });
 
+      const connectionTime = Date.now() - startTime;
       const tunnelInfo: TunnelInfo = {
         url,
         port: config.port,
@@ -78,51 +94,100 @@ export class TunnelManager {
 
       this.activeTunnels.set(tunnelUuid, tunnelInfo);
       
-      console.log(`Tunnel created: ${url} -> localhost:${config.port}`);
+      log.success(`✅ Ngrok tunnel established in ${connectionTime}ms`);
+      log.info(`🌍 Public URL: ${url} -> localhost:${config.port}`);
+      log.debug('Tunnel details', {
+        url,
+        uuid: tunnelUuid,
+        subdomain,
+        port: config.port,
+        connectionTimeMs: connectionTime,
+        activeTunnels: this.activeTunnels.size
+      });
+      
       return tunnelInfo;
     } catch (error) {
-      throw new Error(`Failed to create ngrok tunnel: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const failureTime = Date.now() - startTime;
+      log.error(`❌ Ngrok connection failed after ${failureTime}ms`, {
+        targetDomain: customDomain,
+        port: config.port,
+        error: String(error),
+        uuid: tunnelUuid
+      });
+      throw new Error(`Failed to create ngrok tunnel to ${customDomain}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   async disconnectTunnel(uuid: string): Promise<void> {
     if (!ngrok) {
-      console.warn('Ngrok package not available, skipping tunnel disconnect');
+      log.warn('Ngrok package not available, skipping tunnel disconnect');
       return;
     }
     
     const tunnel = this.activeTunnels.get(uuid);
     if (!tunnel) {
-      console.warn(`Tunnel with UUID ${uuid} not found`);
+      log.warn(`⚠️  Tunnel with UUID ${uuid} not found - may already be disconnected`);
       return;
     }
 
+    const startTime = Date.now();
+    log.info(`🔌 Disconnecting tunnel: ${tunnel.url}`);
+    
     try {
       await ngrok.disconnect(tunnel.url);
       this.activeTunnels.delete(uuid);
-      console.log(`Tunnel disconnected: ${tunnel.url}`);
+      
+      const disconnectionTime = Date.now() - startTime;
+      log.success(`✅ Tunnel disconnected in ${disconnectionTime}ms: ${tunnel.url}`);
+      log.debug('Disconnection details', {
+        uuid,
+        url: tunnel.url,
+        port: tunnel.port,
+        disconnectionTimeMs: disconnectionTime,
+        remainingTunnels: this.activeTunnels.size
+      });
     } catch (error) {
-      throw new Error(`Failed to disconnect tunnel ${uuid}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      const failureTime = Date.now() - startTime;
+      log.error(`❌ Failed to disconnect tunnel ${uuid} after ${failureTime}ms`, {
+        url: tunnel.url,
+        error: String(error)
+      });
+      throw new Error(`Failed to disconnect tunnel ${uuid} (${tunnel.url}): ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
   async disconnectAll(): Promise<void> {
     const tunnelUuids = Array.from(this.activeTunnels.keys());
     
+    if (tunnelUuids.length === 0) {
+      log.debug('No active tunnels to disconnect');
+      return;
+    }
+
+    log.info(`🔌 Disconnecting ${tunnelUuids.length} active tunnel(s)`);
+    const startTime = Date.now();
+    let successCount = 0;
+    let failureCount = 0;
+    
     for (const uuid of tunnelUuids) {
       try {
         await this.disconnectTunnel(uuid);
+        successCount++;
       } catch (error) {
-        console.warn(`Failed to disconnect tunnel ${uuid}:`, error);
+        failureCount++;
+        log.warn(`⚠️  Failed to disconnect tunnel ${uuid}`, { error: String(error) });
       }
     }
 
     if (ngrok) {
       try {
+        log.debug('Terminating all ngrok processes...');
         await ngrok.kill();
-        console.log('All ngrok processes terminated');
+        const totalTime = Date.now() - startTime;
+        log.success(`🏁 All ngrok processes terminated in ${totalTime}ms`);
+        log.info(`📊 Tunnel cleanup summary: ${successCount} successful, ${failureCount} failed`);
       } catch (error) {
-        console.warn('Failed to kill ngrok processes:', error);
+        log.error('❌ Failed to kill ngrok processes', { error: String(error) });
       }
     }
   }
@@ -152,8 +217,12 @@ export class TunnelManager {
   async getTunnelStatus(uuid: string): Promise<{ active: boolean; url?: string; port?: number }> {
     const tunnel = this.activeTunnels.get(uuid);
     if (!tunnel) {
+      log.debug(`Tunnel status check: UUID ${uuid} not found`);
       return { active: false };
     }
+
+    const startTime = Date.now();
+    log.debug(`🔍 Checking tunnel connectivity: ${tunnel.url}`);
 
     try {
       await fetch(`${tunnel.url}/health`, {
@@ -161,12 +230,21 @@ export class TunnelManager {
         signal: AbortSignal.timeout(5000)
       });
       
+      const responseTime = Date.now() - startTime;
+      log.debug(`✅ Tunnel is active and responding (${responseTime}ms): ${tunnel.url}`);
+      
       return {
         active: true,
         url: tunnel.url,
         port: tunnel.port
       };
-    } catch {
+    } catch (error) {
+      const failureTime = Date.now() - startTime;
+      log.debug(`❌ Tunnel connectivity check failed (${failureTime}ms)`, {
+        url: tunnel.url,
+        error: String(error)
+      });
+      
       return {
         active: false,
         url: tunnel.url,
@@ -184,11 +262,21 @@ export class TunnelManager {
     endpointUuid: string,
     tunnelKey: string
   ): Promise<TunnelInfo> {
+    const targetDomain = `${endpointUuid}.${this.baseDomain}`;
+    
+    log.info(`🔑 Creating tunnel with backend-provided credentials`);
+    log.debug('Backend tunnel configuration', {
+      endpointUuid,
+      targetDomain,
+      port,
+      hasKey: !!tunnelKey
+    });
+
     return this.createTunnel({
       port,
       endpointUuid,
       tunnelKey,
-      customDomain: `${endpointUuid}.${this.baseDomain}`
+      customDomain: targetDomain
     });
   }
 }

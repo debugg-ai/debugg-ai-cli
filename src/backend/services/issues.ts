@@ -1,6 +1,8 @@
 // services/issues.ts
 import { AxiosResponse, Issue, IssueSuggestion, PaginatedIssueResponse, PaginatedIssueSuggestionResponse } from "../types";
 import { AxiosTransport } from "../utils/axiosTransport";
+import { truncateForLogging } from "../cli/transport";
+import { log } from "../../util/logging";
 
 
 export interface IssuesService {
@@ -61,14 +63,14 @@ export const createIssuesService = (tx: AxiosTransport): IssuesService => ({
 
     try {
       const serverUrl = "api/v1/suggestions/for_project/";
-      console.log('Branch name - ', branchName, ' repo name - ', repoName, ' repo path - ', params?.repoPath);
+      // Debug info removed to reduce log pollution
 
       let relativePath = filePath;
       // Convert absolute path to relative path
       if (params?.repoPath) {
         relativePath = filePath.replace(params?.repoPath + "/", "");
       } else {
-        console.log("No repo path found for file");
+        log.debug("No repo path found for file");
         // split based on the repo name
         const repoBaseName = repoName.split("/")[-1];  // typically the form of 'userName/repoName'
         const splitPath = filePath.split(repoBaseName);
@@ -78,7 +80,7 @@ export const createIssuesService = (tx: AxiosTransport): IssuesService => ({
           relativePath = filePath;
         }
       }
-      console.log("GET_ISSUES_IN_FILE: Full path - ", filePath, ". Relative path - ", relativePath);
+      log.debug(`GET_ISSUES_IN_FILE: Full path: ${filePath}, Relative path: ${relativePath}`);
       const fileParams = {
         ...params,
         filePath: relativePath,
@@ -87,7 +89,7 @@ export const createIssuesService = (tx: AxiosTransport): IssuesService => ({
       };
       const response = await tx.get<PaginatedIssueResponse>(serverUrl, {...fileParams});
 
-      console.log("Raw API response:", response);
+      log.debug("API response", truncateForLogging(response));
 
       // Optionally filter suggestions that match the current file
       // (If your backend already filters by file_path, this might be unnecessary,
@@ -96,7 +98,7 @@ export const createIssuesService = (tx: AxiosTransport): IssuesService => ({
       return issues;
 
     } catch (err) {
-      console.error("Error fetching issues in file:", err);
+      log.error("Error fetching issues in file", err);
       return [];
     }
 

@@ -1,6 +1,8 @@
 // services/issues.ts
 import { DebuggTransport } from "../stubs/client";
 import { E2eRun, E2eTest, E2eTestCommitSuite, E2eTestSuite, PaginatedResponse } from "../types";
+import { truncateForLogging } from "../cli/transport";
+import { log } from "../../util/logging";
 
 
 export interface E2esService {
@@ -35,7 +37,7 @@ const paramsToBody = (params: Record<string, any>) => {
     if (params?.repoPath) {
         relativePath = filePath?.replace(params?.repoPath + "/", "");
     } else {
-        console.log("No repo path found for file");
+        log.debug("No repo path found for file");
         // split based on the repo name
         const repoBaseName = repoName?.split("/")[-1] ?? "";  // typically the form of 'userName/repoName'
         const splitPath = filePath?.split(repoBaseName) ?? [];
@@ -52,7 +54,7 @@ const paramsToBody = (params: Record<string, any>) => {
         repoName: repoName ?? "",
         branchName: branchName ?? "",
     };
-    console.log("Body params - ", body);
+    log.debug("Body params", body);
     return body;
 };
 
@@ -95,11 +97,11 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
             // };
             const response = await tx.post<E2eTest>(serverUrl, { description, ...params });
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err) {
-            console.error("Error creating E2E test:", err);
+            log.error("Error creating E2E test", err);
             return null;
         }
     },
@@ -114,11 +116,11 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
             const serverUrl = `api/v1/e2e-tests/${uuid}/run/`;
             const response = await tx.post<E2eTest>(serverUrl, { ...params });
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err) {
-            console.error("Error running E2E test:", err);
+            log.error("Error running E2E test", err);
             return null;
         }
     },
@@ -132,14 +134,14 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
     ): Promise<E2eRun | null> {
         try {
             const serverUrl = "api/v1/e2e-runs/";
-            console.log('Branch name - ', branchName, ' repo name - ', repoName, ' repo path - ', params?.repoPath);
+            log.debug(`Branch: ${branchName}, Repo: ${repoName}, Path: ${params?.repoPath}`);
 
             let relativePath = filePath;
             // Convert absolute path to relative path
             if (params?.repoPath) {
                 relativePath = filePath.replace(params?.repoPath + "/", "");
             } else {
-                console.log("No repo path found for file");
+                log.debug("No repo path found for file");
                 // split based on the repo name
                 const repoBaseName = repoName.split("/")[-1];  // typically the form of 'userName/repoName'
                 const splitPath = filePath.split(repoBaseName);
@@ -149,7 +151,7 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
                     relativePath = filePath;
                 }
             }
-            console.log("CREATE_E2E_TEST: Full path - ", filePath, ". Relative path - ", relativePath);
+            log.debug(`CREATE_E2E_TEST: Full path: ${filePath}, Relative path: ${relativePath}`);
             const fileParams = {
                 ...params,
                 fileContents: fileContents,
@@ -160,11 +162,11 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
             };
             const response = await tx.post<E2eRun>(serverUrl, { ...fileParams }, undefined, false);
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err) {
-            console.error("Error creating E2E test:", err);
+            log.error("Error creating E2E test", err);
             return null;
         }
     },
@@ -180,11 +182,11 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
             const serverUrl = `api/v1/e2e-runs/${uuid}/`;
             const response = await tx.get<E2eRun>(serverUrl, { ...params });
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err) {
-            console.error("Error fetching E2E run:", err);
+            log.error("Error fetching E2E run", err);
             return null;
         }
 
@@ -202,11 +204,11 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
             const serverUrl = `api/v1/e2e-tests/${uuid}/`;
             const response = await tx.get<E2eTest>(serverUrl, { ...params });
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err) {
-            console.error("Error fetching E2E test:", err);
+            log.error("Error fetching E2E test", err);
             return null;
         }
 
@@ -222,7 +224,7 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
             const serverUrl = `api/v1/e2e-tests/${uuid}/`;
             await tx.delete(serverUrl, { ...params });
         } catch (err) {
-            console.error("Error deleting E2E test:", err);
+            log.error("Error deleting E2E test", err);
         }
     },
     /**
@@ -236,11 +238,11 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
             const serverUrl = `api/v1/e2e-tests/`;
             const response = await tx.get<PaginatedResponse<E2eTest>>(serverUrl, { ...params }, true);
 
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
 
         } catch (err: any) {
-            console.error("Error listing E2E tests:", err);
+            log.error("Error listing E2E tests", err);
             throw err;
         }
 
@@ -253,10 +255,10 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
             const serverUrl = "api/v1/test-suites/generate_tests/";
             const body = paramsToBody({...params, description});
             const response = await tx.post<E2eTestSuite>(serverUrl, { ...body });
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error creating E2E test suite:", err);
+            log.error("Error creating E2E test suite", err);
             return null;
         }
 
@@ -265,10 +267,10 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
         try {
             const serverUrl = "api/v1/test-suites/";
             const response = await tx.get<PaginatedResponse<E2eTestSuite>>(serverUrl, { ...params }, true);
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error listing E2E test suites:", err);
+            log.error("Error listing E2E test suites", err);
             return null;
         }
     },
@@ -279,10 +281,10 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
         try {
             const serverUrl = `api/v1/test-suites/${uuid}/`;
             const response = await tx.get<E2eTestSuite>(serverUrl, { ...params });
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error fetching E2E test suite:", err);
+            log.error("Error fetching E2E test suite", err);
             return null;
         }
     },
@@ -293,10 +295,10 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
         try {
             const serverUrl = `api/v1/test-suites/${uuid}/run/`;
             const response = await tx.post<E2eTestSuite>(serverUrl, { ...params });
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error running E2E test suite:", err);
+            log.error("Error running E2E test suite", err);
             return null;
         }
     },
@@ -309,10 +311,10 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
             const serverUrl = "api/v1/commit-suites/";
             const body = paramsToBody({...params, description});    
             const response = await tx.post<E2eTestCommitSuite>(serverUrl, { ...body });
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error creating E2E commit suite:", err);
+            log.error("Error creating E2E commit suite", err);
             return null;
         }
     },
@@ -324,10 +326,10 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
         try {
             const serverUrl = `api/v1/commit-suites/${uuid}/run/`;
             const response = await tx.post<E2eTestCommitSuite>(serverUrl, { ...params });
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err) {
-            console.error("Error running E2E commit suite:", err);
+            log.error("Error running E2E commit suite", err);
             return null;
         }
     },
@@ -338,11 +340,10 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
         try {
             const serverUrl = `api/v1/commit-suites/${uuid}/`;
             const response = await tx.get<E2eTestCommitSuite>(serverUrl, { ...params });    
-            console.log("Raw API response:", response);
+            log.debug("API response", truncateForLogging(response));
             return response;
         } catch (err: any) {
-            console.error("Error fetching E2E commit suite:", err);
-            console.error("Error details:", {
+            log.error("Error fetching E2E commit suite", {
                 status: err.response?.status,
                 data: err.response?.data,
                 message: err.message
@@ -354,10 +355,10 @@ export const createE2esService = (tx: DebuggTransport): E2esService => ({
         try {
             const serverUrl = "api/v1/commit-suites/";
             const response = await tx.get<PaginatedResponse<E2eTestCommitSuite>>(serverUrl, { ...params }, true);
-            console.log("Raw API response for commit suites:", response);
+            log.debug("Raw API response for commit suites", response);
             return response;
         } catch (err) {
-            console.error("Error listing E2E commit suites:", err);
+            log.error("Error listing E2E commit suites", err);
             return null;
         }
     },

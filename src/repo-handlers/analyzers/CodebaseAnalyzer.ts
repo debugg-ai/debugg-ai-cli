@@ -1,9 +1,12 @@
 import * as path from 'path';
-import { IDE } from 'core/index.js';
+import * as fs from 'fs-extra';
+import { exec } from 'child_process';
+import { promisify } from 'util';
 import { FileContext, ComponentHierarchy, RouteMapping, ContextExtractionOptions } from '../types/codebaseContext';
 
+const execAsync = promisify(exec);
+
 export class CodebaseAnalyzer {
-  private ide: IDE;
   private options: ContextExtractionOptions;
 
   private filePriorities: Record<string, number> = {
@@ -25,8 +28,7 @@ export class CodebaseAnalyzer {
     'next.config', 'tailwind.config', '.env'
   ];
 
-  constructor(ide: IDE, options: Partial<ContextExtractionOptions> = {}) {
-    this.ide = ide;
+  constructor(options: Partial<ContextExtractionOptions> = {}) {
     this.options = {
       maxFileSize: 100000,
       maxParentFiles: 5,
@@ -85,7 +87,9 @@ export class CodebaseAnalyzer {
       for (const pattern of patterns) {
         let match;
         while ((match = pattern.exec(content)) !== null) {
-          exports.push(match[1]);
+          if (match[1]) {
+            exports.push(match[1]);
+          }
         }
       }
     }
@@ -106,7 +110,9 @@ export class CodebaseAnalyzer {
       for (const pattern of patterns) {
         let match;
         while ((match = pattern.exec(content)) !== null) {
-          imports.push(match[1]);
+          if (match[1]) {
+            imports.push(match[1]);
+          }
         }
       }
     } else if (language === 'python') {
@@ -118,7 +124,9 @@ export class CodebaseAnalyzer {
       for (const pattern of patterns) {
         let match;
         while ((match = pattern.exec(content)) !== null) {
-          imports.push(match[1]);
+          if (match[1]) {
+            imports.push(match[1]);
+          }
         }
       }
     }
@@ -142,7 +150,7 @@ export class CodebaseAnalyzer {
         let match;
         while ((match = pattern.exec(content)) !== null) {
           const route = match[1];
-          if (route.startsWith('/') && route.length > 1) {
+          if (route && route.startsWith('/') && route.length > 1) {
             routes.push(route);
           }
         }
@@ -193,22 +201,24 @@ export class CodebaseAnalyzer {
     
     for (let i = 0; i < maxFiles; i++) {
       const changedFile = changedFiles[i];
+      if (!changedFile) continue;
+      
       const fileName = path.basename(changedFile, path.extname(changedFile));
       
       try {
         // Search for imports with timeout
-        const [output] = await Promise.race([
-          this.ide.subprocess(
+        const result = await Promise.race([
+          execAsync(
             `grep -r -l --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" --max-count=10 "from.*${fileName}" . || true`,
-            repoPath
+            { cwd: repoPath }
           ),
-          new Promise<[string, string]>((_, reject) => 
+          new Promise<{ stdout: string; stderr: string }>((_, reject) => 
             setTimeout(() => reject(new Error('timeout')), this.options.timeoutMs)
           )
         ]);
         
-        if (output) {
-          const lines = output.trim().split('\n').filter(line => line && !line.includes(changedFile));
+        if (result.stdout) {
+          const lines = result.stdout.trim().split('\n').filter(line => line && !line.includes(changedFile));
           for (const line of lines.slice(0, this.options.maxParentFiles)) {
             parentFiles.add(line.replace(repoPath + '/', '').replace('./', ''));
           }
@@ -228,18 +238,18 @@ export class CodebaseAnalyzer {
     try {
       // Use a single find command with limited results
       const patterns = this.routingPatterns.slice(0, 5).map(p => `-name "*${p}*"`).join(' -o ');
-      const [output] = await Promise.race([
-        this.ide.subprocess(
+      const result = await Promise.race([
+        execAsync(
           `find . -type f \\( ${patterns} \\) -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" | head -${this.options.maxRoutingFiles}`,
-          repoPath
+          { cwd: repoPath }
         ),
-        new Promise<[string, string]>((_, reject) => 
+        new Promise<{ stdout: string; stderr: string }>((_, reject) => 
           setTimeout(() => reject(new Error('timeout')), this.options.timeoutMs)
         )
       ]);
       
-      if (output) {
-        const lines = output.trim().split('\n').filter(line => 
+      if (result.stdout) {
+        const lines = result.stdout.trim().split('\n').filter(line => 
           line && !line.includes('node_modules') && !line.includes('.git')
         );
         routingFiles.push(...lines.slice(0, this.options.maxRoutingFiles));
@@ -256,18 +266,18 @@ export class CodebaseAnalyzer {
     
     try {
       const patterns = this.configPatterns.slice(0, 4).map(p => `-name "${p}*"`).join(' -o ');
-      const [output] = await Promise.race([
-        this.ide.subprocess(
+      const result = await Promise.race([
+        execAsync(
           `find . -maxdepth 2 -type f \\( ${patterns} \\) | head -${this.options.maxConfigFiles}`,
-          repoPath
+          { cwd: repoPath }
         ),
-        new Promise<[string, string]>((_, reject) => 
+        new Promise<{ stdout: string; stderr: string }>((_, reject) => 
           setTimeout(() => reject(new Error('timeout')), this.options.timeoutMs)
         )
       ]);
       
-      if (output) {
-        const lines = output.trim().split('\n').filter(line => 
+      if (result.stdout) {
+        const lines = result.stdout.trim().split('\n').filter(line => 
           line && !line.includes('node_modules') && !line.includes('.git')
         );
         configFiles.push(...lines.slice(0, this.options.maxConfigFiles));
@@ -282,7 +292,7 @@ export class CodebaseAnalyzer {
   async readFileContent(repoPath: string, filePath: string): Promise<{ content: string; sizeBytes: number }> {
     try {
       const fullPath = path.join(repoPath, filePath);
-      const content = await this.ide.readFile(fullPath);
+      const content = await fs.readFile(fullPath, 'utf8');
       const sizeBytes = Buffer.byteLength(content, 'utf8');
       
       if (sizeBytes > this.options.maxFileSize) {

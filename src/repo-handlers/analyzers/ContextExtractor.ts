@@ -1,15 +1,12 @@
-import { WorkingChanges } from 'core/debuggAIServer/types';
-import { IDE } from 'core/index.js';
+import { WorkingChanges } from '../../lib/git-analyzer';
 import { CodebaseContext, ContextExtractionOptions, FileContext } from '../types/codebaseContext';
 import { CodebaseAnalyzer } from './CodebaseAnalyzer';
 
 export class ContextExtractor {
-  private ide: IDE;
   private analyzer: CodebaseAnalyzer;
   private options: ContextExtractionOptions;
 
-  constructor(ide: IDE, options: Partial<ContextExtractionOptions> = {}) {
-    this.ide = ide;
+  constructor(options: Partial<ContextExtractionOptions> = {}) {
     this.options = {
       maxFileSize: 100000,
       maxParentFiles: 2,
@@ -18,7 +15,7 @@ export class ContextExtractor {
       timeoutMs: 15000,
       ...options
     };
-    this.analyzer = new CodebaseAnalyzer(ide, this.options);
+    this.analyzer = new CodebaseAnalyzer(this.options);
   }
 
   async extractCodebaseContext(
@@ -97,6 +94,8 @@ export class ContextExtractor {
 
     for (let i = 0; i < maxFiles; i++) {
       const change = workingChanges.changes[i];
+      if (!change) continue;
+      
       try {
         const fileContext = await this.analyzer.createFileContext(repoPath, change.file, 'changed');
         if (fileContext) {

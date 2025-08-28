@@ -1,5 +1,6 @@
 // services/repos.ts
 import { AxiosTransport } from "../utils/axiosTransport";
+import { systemLogger } from "../../util/system-logger";
 
 export interface ReposService {
   upsertVectorCollection(
@@ -16,7 +17,7 @@ export const createReposService = (
   tx: AxiosTransport,
 ): ReposService => ({
   async upsertVectorCollection(collectionName, directory, branch, artifactId, repoName) {
-    console.log("upsertVectorCollection - ", collectionName, directory, branch, artifactId, repoName);
+    systemLogger.debug("upsertVectorCollection - ", collectionName, directory, branch, artifactId, repoName);
     try {
       const response = await tx.post("/api/v1/collections/upsert/", {
         collectionName,
@@ -25,15 +26,15 @@ export const createReposService = (
         artifactId,
         repoName,
       });
-      console.log("upsertVectorCollection response - ", response);
+      systemLogger.debug("upsertVectorCollection response - ", response);
     } catch (error) {
-      console.error("Error upserting vector collection", error);
+      systemLogger.error("Error upserting vector collection", error);
       throw error;
     }
   },
 
   async deleteVectorCollection(collectionName) {
-    console.log("deleteVectorCollection - ", collectionName);
+    systemLogger.debug("deleteVectorCollection - ", collectionName);
     await tx.delete(`/api/v1/collections/${collectionName}/`);
   },
 });
