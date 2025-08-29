@@ -494,17 +494,32 @@ class UserLogger {
     console.log(`Tests: ${suite.tests?.length || 0}`);
 
     if (suite.tests && suite.tests.length > 0) {
-      const passed = suite.tests.filter((t: any) => t.curRun?.status === 'completed').length;
-      const failed = suite.tests.filter((t: any) => t.curRun?.status === 'failed').length;
+      // Use outcome field instead of status for more accurate results
+      const passed = suite.tests.filter((t: any) => t.curRun?.outcome === 'pass').length;
+      const failed = suite.tests.filter((t: any) => t.curRun?.outcome === 'fail').length;
+      const skipped = suite.tests.filter((t: any) => t.curRun?.outcome === 'skipped').length;
+      const pending = suite.tests.filter((t: any) => t.curRun?.outcome === 'pending').length;
+      const unknown = suite.tests.filter((t: any) => !t.curRun?.outcome || t.curRun?.outcome === 'unknown').length;
       const total = suite.tests.length;
 
-      console.log('\n' + chalk.bold('Summary:'));
+      console.log('\n' + chalk.bold('Test Outcomes:'));
       console.log(`  ${chalk.green(`✓ Passed: ${passed}`)}`);
       console.log(`  ${chalk.red(`✗ Failed: ${failed}`)}`);
-      console.log(`  ${chalk.blue(`Total: ${total}`)}`);
+      if (skipped > 0) {
+        console.log(`  ${chalk.yellow(`⏩ Skipped: ${skipped}`)}`);
+      }
+      if (pending > 0) {
+        console.log(`  ${chalk.blue(`⏸ Pending: ${pending}`)}`);
+      }
+      if (unknown > 0) {
+        console.log(`  ${chalk.gray(`❓ Unknown: ${unknown}`)}`);
+      }
+      console.log(`  ${chalk.blue(`📊 Total: ${total}`)}`);
 
       if (failed > 0) {
         console.log(`\n${chalk.yellow('⚠ Some tests failed. Check the generated test files and recordings for details.')}`);
+      } else if (passed === total && total > 0) {
+        console.log(`\n${chalk.green('🎉 All tests passed successfully!')}`);
       }
     }
   }
@@ -529,6 +544,22 @@ class UserLogger {
         return chalk.yellow('⏳ RUNNING');
       case 'pending':
         return chalk.blue('⏸ PENDING');
+      default:
+        return chalk.gray('❓ UNKNOWN');
+    }
+  }
+
+  private getOutcomeColor(outcome: string): string {
+    switch (outcome) {
+      case 'pass':
+        return chalk.green('✓ PASSED');
+      case 'fail':
+        return chalk.red('✗ FAILED');
+      case 'skipped':
+        return chalk.yellow('⏩ SKIPPED');
+      case 'pending':
+        return chalk.blue('⏸ PENDING');
+      case 'unknown':
       default:
         return chalk.gray('❓ UNKNOWN');
     }

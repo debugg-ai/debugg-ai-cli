@@ -30,6 +30,9 @@ program
   .option('--commit-range <range>', 'Commit range to analyze (e.g., HEAD~3..HEAD, main..feature-branch)')
   .option('--since <date>', 'Analyze commits since date/time (e.g., "2024-01-01", "2 days ago")')
   .option('--last <number>', 'Analyze last N commits (e.g., --last 3)')
+  .option('--pr-sequence', 'Enable PR commit sequence testing (sends individual test requests for each commit in PR)')
+  .option('--base-branch <branch>', 'Base branch for PR testing (auto-detected from GitHub env if not provided)')
+  .option('--head-branch <branch>', 'Head branch for PR testing (auto-detected from GitHub env if not provided)')
   .option('--wait-for-server', 'Wait for local development server to be ready')
   .option('--server-port <port>', 'Local server port to wait for (default: 3000)', '3000')
   .option('--server-timeout <ms>', 'Server wait timeout in milliseconds (default: 60000)', '60000')
@@ -119,7 +122,11 @@ program
           commit: options.commit,
           commitRange: options.commitRange,
           since: options.since,
-          ...(options.last && { last: parseInt(options.last) })
+          ...(options.last && { last: parseInt(options.last) }),
+          // PR sequence options
+          prSequence: options.prSequence || false,
+          baseBranch: options.baseBranch,
+          headBranch: options.headBranch
         }, options.tunnelUuid, parseInt(options.tunnelPort) || 3000);
       } else {
         // Standard mode with tunnel key for backend tunnel creation
@@ -138,7 +145,11 @@ program
           commit: options.commit,
           commitRange: options.commitRange,
           since: options.since,
-          ...(options.last && { last: parseInt(options.last) })
+          ...(options.last && { last: parseInt(options.last) }),
+          // PR sequence options
+          prSequence: options.prSequence || false,
+          baseBranch: options.baseBranch,
+          headBranch: options.headBranch
         });
       }
 
@@ -375,6 +386,9 @@ program
   .option('--cleanup-on-success', 'Cleanup resources after successful completion (default: true)', true)
   .option('--cleanup-on-error', 'Cleanup resources after errors (default: true)', true)
   .option('--download-artifacts', 'Download test artifacts (scripts, recordings, JSON results) to local filesystem')
+  .option('--pr-sequence', 'Enable PR commit sequence testing (sends individual test requests for each commit in PR)')
+  .option('--base-branch <branch>', 'Base branch for PR testing (auto-detected from GitHub env if not provided)')
+  .option('--head-branch <branch>', 'Head branch for PR testing (auto-detected from GitHub env if not provided)')
   .option('--verbose', 'Verbose logging')
   .option('--dev', 'Enable development logging (shows all technical details, server logs, tunnel info)')
   .option('--no-color', 'Disable colored output')
@@ -480,7 +494,11 @@ program
           downloadArtifacts: options.downloadArtifacts || false,
           tunnelKey, // Add the generated tunnel key
           createTunnel: true, // Enable tunnel creation
-          tunnelPort: parseInt(options.port) || 3000 // Use server port for tunnel
+          tunnelPort: parseInt(options.port) || 3000, // Use server port for tunnel
+          // PR sequence options
+          prSequence: options.prSequence || false,
+          baseBranch: options.baseBranch,
+          headBranch: options.headBranch
         },
         cleanup: {
           onSuccess: options.cleanupOnSuccess,

@@ -22,6 +22,10 @@ export interface TestManagerOptions {
   commitRange?: string; // Commit range (e.g., HEAD~3..HEAD)
   since?: string; // Commits since date/time
   last?: number; // Last N commits
+  // PR testing options
+  prSequence?: boolean; // Enable PR commit sequence testing (sends individual test requests per commit)
+  baseBranch?: string | undefined; // Base branch for PR testing (auto-detected from GitHub env if not provided)
+  headBranch?: string | undefined; // Head branch for PR testing (auto-detected from GitHub env if not provided)
   // Tunnel configuration
   tunnelKey?: string; // UUID for custom endpoints (e.g., <uuid>.debugg.ai) - passed as 'key' to backend
   createTunnel?: boolean; // Whether to create an ngrok tunnel after getting tunnelKey from backend
@@ -30,12 +34,25 @@ export interface TestManagerOptions {
 
 export interface TestResult {
   success: boolean;
-  suiteUuid?: string;
+  suiteUuid?: string | undefined;
   suite?: any; // Using any for now since we're working with backend types
   error?: string;
   testFiles?: string[];
   tunnelKey?: string; // TunnelKey returned from backend for ngrok setup
   tunnelInfo?: TunnelInfo; // Tunnel information if tunnel was created
+  // PR sequence testing results
+  prSequenceResults?: PRSequenceResult[];
+  totalCommitsTested?: number;
+}
+
+export interface PRSequenceResult {
+  commitHash: string;
+  commitMessage: string;
+  commitOrder: number;
+  suiteUuid: string;
+  success: boolean;
+  error?: string;
+  testFiles?: string[];
 }
 
 /**
@@ -133,6 +150,12 @@ export class TestManager {
 
       systemLogger.api.auth(true, authTest.user?.email || authTest.user?.id);
 
+      // Step 3.5: Check if PR sequence testing is enabled
+      if (this.options.prSequence) {
+        systemLogger.info('PR sequence testing enabled - analyzing commit sequence', { category: 'test' });
+        return await this.runPRCommitSequenceTests();
+      }
+
       // Step 4: Validate tunnel URL if provided (simplified for now)
       if (this.options.tunnelUrl) {
         systemLogger.info('Using tunnel URL', { category: 'tunnel' });
@@ -156,12 +179,21 @@ export class TestManager {
 
       // Step 7: Submit test request
       systemLogger.info('Creating test suite', { category: 'test' });
+      
+      // Create test description for the changes
+      const testDescription = await this.createTestDescription(changes);
+      
+      // Get PR number if available
+      const prNumber = this.gitAnalyzer.getPRNumber();
+      
       const testRequest: any = {
         repoName: this.gitAnalyzer.getRepoName(),
         repoPath: this.options.repoPath,
         branchName: changes.branchInfo.branch,
         commitHash: changes.branchInfo.commitHash,
-        workingChanges: changes.changes
+        workingChanges: changes.changes,
+        testDescription,
+        ...(prNumber && { prNumber })
       };
 
       // Add tunnel key (UUID) for custom endpoints (e.g., <uuid>.debugg.ai)
@@ -319,6 +351,225 @@ export class TestManager {
       }
       
     }
+  }
+
+  /**
+   * Run PR commit sequence tests - sends individual test requests for each commit
+   */
+  async runPRCommitSequenceTests(): Promise<TestResult> {
+    try {
+      // Step 1: Analyze PR commit sequence
+      const prSequence = await this.gitAnalyzer.analyzePRCommitSequence(
+        this.options.baseBranch,
+        this.options.headBranch
+      );
+
+      if (!prSequence || prSequence.commits.length === 0) {
+        systemLogger.warn('No PR commits found to test');
+        return {
+          success: true,
+          testFiles: [],
+          prSequenceResults: [],
+          totalCommitsTested: 0
+        };
+      }
+
+      systemLogger.info(`Found ${prSequence.totalCommits} commits to test sequentially`, { category: 'test' });
+      systemLogger.info(`PR: ${prSequence.baseBranch} <- ${prSequence.headBranch}`, { category: 'git' });
+
+      const sequenceResults: PRSequenceResult[] = [];
+      const allTestFiles: string[] = [];
+      let anyFailed = false;
+
+      // Process each commit individually
+      for (const commit of prSequence.commits) {
+        systemLogger.info(`\n--- Testing Commit ${commit.order}/${prSequence.totalCommits} ---`, { category: 'test' });
+        systemLogger.info(`Commit: ${commit.hash.substring(0, 8)} - ${commit.message}`, { category: 'git' });
+        systemLogger.info(`Author: ${commit.author}`, { category: 'git' });
+        systemLogger.info(`Changes: ${commit.changes.length} files`, { category: 'git' });
+
+        try {
+          // Create test request for this specific commit
+          const result = await this.createCommitTestSuite(commit, prSequence);
+          
+          if (result.success && result.suiteUuid) {
+            // Wait for completion
+            const completedSuite = await this.client.waitForCommitTestSuiteCompletion(
+              result.suiteUuid,
+              {
+                maxWaitTime: this.options.maxTestWaitTime || 600000
+              }
+            );
+
+            if (completedSuite) {
+              // Download artifacts if enabled
+              let testFiles: string[] = [];
+              if (this.options.downloadArtifacts) {
+                testFiles = await this.saveTestArtifacts(completedSuite);
+                allTestFiles.push(...testFiles);
+              }
+
+              sequenceResults.push({
+                commitHash: commit.hash,
+                commitMessage: commit.message,
+                commitOrder: commit.order,
+                suiteUuid: result.suiteUuid,
+                success: true,
+                testFiles
+              });
+
+              systemLogger.success(`✓ Commit ${commit.order} tests completed`);
+            } else {
+              // Test suite timed out
+              sequenceResults.push({
+                commitHash: commit.hash,
+                commitMessage: commit.message,
+                commitOrder: commit.order,
+                suiteUuid: result.suiteUuid,
+                success: false,
+                error: 'Test suite timed out'
+              });
+              anyFailed = true;
+              systemLogger.error(`✗ Commit ${commit.order} tests timed out`);
+            }
+          } else {
+            // Test suite creation failed
+            sequenceResults.push({
+              commitHash: commit.hash,
+              commitMessage: commit.message,
+              commitOrder: commit.order,
+              suiteUuid: '',
+              success: false,
+              error: result.error || 'Failed to create test suite'
+            });
+            anyFailed = true;
+            systemLogger.error(`✗ Commit ${commit.order} test creation failed: ${result.error}`);
+          }
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          sequenceResults.push({
+            commitHash: commit.hash,
+            commitMessage: commit.message,
+            commitOrder: commit.order,
+            suiteUuid: '',
+            success: false,
+            error: errorMsg
+          });
+          anyFailed = true;
+          systemLogger.error(`✗ Commit ${commit.order} failed: ${errorMsg}`);
+        }
+      }
+
+      // Report overall results
+      const successCount = sequenceResults.filter(r => r.success).length;
+      systemLogger.info(`\n=== PR Commit Sequence Results ===`, { category: 'test' });
+      systemLogger.info(`Total commits tested: ${prSequence.totalCommits}`, { category: 'test' });
+      systemLogger.info(`Successful: ${successCount}`, { category: 'test' });
+      systemLogger.info(`Failed: ${prSequence.totalCommits - successCount}`, { category: 'test' });
+
+      if (this.options.downloadArtifacts && allTestFiles.length > 0) {
+        systemLogger.success(`Generated ${allTestFiles.length} total test files across all commits`);
+      }
+
+      const firstSuiteUuid = sequenceResults.length > 0 && sequenceResults[0] ? sequenceResults[0].suiteUuid : undefined;
+      
+      return {
+        success: !anyFailed,
+        testFiles: allTestFiles,
+        prSequenceResults: sequenceResults,
+        totalCommitsTested: prSequence.totalCommits,
+        suiteUuid: firstSuiteUuid
+      };
+
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+      systemLogger.error(`PR sequence testing failed: ${errorMsg}`);
+      
+      return {
+        success: false,
+        error: errorMsg,
+        prSequenceResults: [],
+        totalCommitsTested: 0
+      };
+    }
+  }
+
+  /**
+   * Create a test suite for a specific commit in a PR sequence
+   */
+  private async createCommitTestSuite(commit: any, prSequence: any): Promise<any> {
+    // Get repository information
+    const repoName = this.gitAnalyzer.getRepoName();
+    
+    // Create test description specific to this commit
+    const testDescription = await this.createCommitTestDescription(commit, prSequence);
+
+    const testRequest: any = {
+      repoName,
+      repoPath: this.options.repoPath,
+      branchName: prSequence.headBranch,
+      commitHash: commit.hash,
+      workingChanges: commit.changes.map((change: any) => ({
+        status: change.status,
+        file: change.file,
+        diff: change.diff
+      })),
+      testDescription,
+      ...(prSequence.prNumber && { prNumber: prSequence.prNumber }),
+      // Add PR context metadata
+      prContext: {
+        baseBranch: prSequence.baseBranch,
+        headBranch: prSequence.headBranch,
+        commitOrder: commit.order,
+        totalCommits: prSequence.totalCommits,
+        isSequentialTest: true
+      }
+    };
+
+    // Add tunnel configuration if available
+    if (this.options.tunnelKey) {
+      testRequest.tunnelKey = this.options.tunnelKey;
+    }
+    if (this.options.createTunnel) {
+      testRequest.createTunnel = true;
+      testRequest.tunnelPort = this.options.tunnelPort || 3000;
+    }
+
+    return await this.client.createCommitTestSuite(testRequest);
+  }
+
+
+  /**
+   * Create a test description for a specific commit in a PR sequence
+   */
+  private async createCommitTestDescription(commit: any, prSequence: any): Promise<string> {
+    const changeTypes = this.analyzeFileTypes(commit.changes);
+    
+    // Count changes by type
+    const componentCount = changeTypes.filter(t => t.type === 'component').reduce((sum, t) => sum + t.count, 0);
+    const routingCount = changeTypes.filter(t => t.type === 'routing').reduce((sum, t) => sum + t.count, 0);
+    const configCount = changeTypes.filter(t => t.type === 'configuration').reduce((sum, t) => sum + t.count, 0);
+    const stylingCount = changeTypes.filter(t => t.type === 'styling').reduce((sum, t) => sum + t.count, 0);
+    const otherCount = changeTypes.filter(t => !['component', 'routing', 'configuration', 'styling'].includes(t.type)).reduce((sum, t) => sum + t.count, 0);
+    
+    return `Sequential PR Test - Commit ${commit.order}/${prSequence.totalCommits}
+
+Commit: ${commit.hash.substring(0, 8)} - ${commit.message}
+Author: ${commit.author}
+Branch: ${prSequence.baseBranch} <- ${prSequence.headBranch}
+
+Changes in this commit:
+${commit.changes.map((c: any) => `- [${c.status}] ${c.file}`).join('\n')}
+
+Change Summary:
+- ${commit.changes.length} file${commit.changes.length !== 1 ? 's' : ''} modified
+- Components: ${componentCount}
+- Routing: ${routingCount}
+- Configuration: ${configCount}
+- Styling: ${stylingCount}
+- Other: ${otherCount}
+
+Focus: Test the specific functionality changes introduced by this individual commit in the sequence.`;
   }
 
   /**
@@ -677,9 +928,9 @@ Test Requirements:
     // Use systemLogger's displayResults which handles both dev and user modes
     systemLogger.displayResults(suite);
 
-    // Set exit code for CI/CD
+    // Set exit code for CI/CD based on test outcomes
     if (suite.tests && suite.tests.length > 0) {
-      const failed = suite.tests.filter((t: any) => t.curRun?.status === 'failed').length;
+      const failed = suite.tests.filter((t: any) => t.curRun?.outcome === 'fail').length;
       if (failed > 0) {
         process.exitCode = 1; // Set non-zero exit code for CI/CD
       }

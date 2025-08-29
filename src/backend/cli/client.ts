@@ -155,6 +155,7 @@ export class CLIBackendClient {
             metadata?: Record<string, any>;
         };
         context?: Record<string, any>;
+        prNumber?: number; // Pull request number for GitHub integrations
     }): Promise<{ success: boolean; testSuiteUuid?: string; tunnelKey?: string; error?: string }> {
         try {
             await this.ensureInitialized();
@@ -171,6 +172,7 @@ export class CLIBackendClient {
                 workingChanges: request.workingChanges,
                 publicUrl: request.publicUrl,
                 testEnvironment: request.testEnvironment,
+                prNumber: request.prNumber,
                 ...request.context
             });
 

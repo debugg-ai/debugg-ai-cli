@@ -29,12 +29,15 @@ export type {
   CommitInfo,
   BranchInfo,
   WorkingChanges,
-  GitAnalyzerOptions
+  GitAnalyzerOptions,
+  PRCommitInfo,
+  PRCommitSequence
 } from './lib/git-analyzer';
 
 export type {
   TestManagerOptions,
-  TestResult
+  TestResult,
+  PRSequenceResult
 } from './lib/test-manager';
 
 export type {
@@ -92,6 +95,9 @@ export async function runDebuggAITests(options: {
   serverPort?: number;
   maxTestWaitTime?: number;
   downloadArtifacts?: boolean;
+  prSequence?: boolean;
+  baseBranch?: string;
+  headBranch?: string;
 }): Promise<{
   success: boolean;
   suiteUuid?: string;
@@ -106,7 +112,10 @@ export async function runDebuggAITests(options: {
     baseUrl: options.baseUrl || 'https://api.debugg.ai',
     testOutputDir: options.testOutputDir || 'tests/debugg-ai',
     maxTestWaitTime: options.maxTestWaitTime || 600000,
-    downloadArtifacts: options.downloadArtifacts || false
+    downloadArtifacts: options.downloadArtifacts || false,
+    prSequence: options.prSequence || false,
+    baseBranch: options.baseBranch,
+    headBranch: options.headBranch
   });
 
   // Wait for server if requested
@@ -158,6 +167,9 @@ export async function runWorkflow(options: {
   baseUrl?: string;
   testOutputDir?: string;
   downloadArtifacts?: boolean;
+  prSequence?: boolean;
+  baseBranch?: string;
+  headBranch?: string;
   serverCommand?: string;
   serverArgs?: string[];
   serverPort?: number;
@@ -205,7 +217,10 @@ export async function runWorkflow(options: {
       repoPath: options.repoPath || process.cwd(),
       testOutputDir: options.testOutputDir || DEFAULT_CONFIG.TEST_OUTPUT_DIR,
       maxTestWaitTime: options.maxTestWaitTime || DEFAULT_CONFIG.MAX_TEST_WAIT_TIME,
-      downloadArtifacts: options.downloadArtifacts || false
+      downloadArtifacts: options.downloadArtifacts || false,
+      prSequence: options.prSequence || false,
+      baseBranch: options.baseBranch,
+      headBranch: options.headBranch
     },
     cleanup: {
       onSuccess: options.cleanup !== false,

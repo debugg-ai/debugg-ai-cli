@@ -36,6 +36,23 @@ export interface GitAnalyzerOptions {
   ignoredFolders?: string[];
 }
 
+export interface PRCommitInfo {
+  hash: string;
+  message: string;
+  author: string;
+  date: string;
+  changes: WorkingChange[];
+  order: number; // Order in the PR (0 = base, 1 = first commit, etc.)
+}
+
+export interface PRCommitSequence {
+  baseBranch: string;
+  headBranch: string; 
+  commits: PRCommitInfo[];
+  totalCommits: number;
+  prNumber?: number;
+}
+
 /**
  * Git analyzer for CI/CD environments like GitHub Actions
  * Simplified version of the commitTester.ts logic
@@ -961,5 +978,180 @@ export class GitAnalyzer {
       '.md': 'Markdown'
     };
     return languageMap[extension] || extension.replace('.', '').toUpperCase();
+  }
+
+  /**
+   * Analyze PR commits for sequential testing
+   * Detects GitHub PR context from environment variables or commit range
+   */
+  async analyzePRCommitSequence(baseBranch?: string | undefined, headBranch?: string | undefined): Promise<PRCommitSequence | null> {
+    try {
+      let prNumber: number | undefined;
+      
+      // Auto-detect PR context from GitHub Actions environment
+      if (!baseBranch && !headBranch) {
+        const prContext = this.detectPRContext();
+        if (!prContext) {
+          return null; // Not in PR context
+        }
+        baseBranch = prContext.baseBranch;
+        headBranch = prContext.headBranch;
+        prNumber = prContext.prNumber;
+      } else {
+        // Even if branches are provided, try to get PR number
+        prNumber = this.extractPRNumber() || undefined;
+      }
+
+      if (!baseBranch || !headBranch) {
+        return null;
+      }
+
+      log.info(`Analyzing PR commit sequence: ${baseBranch}..${headBranch}${prNumber ? ` (PR #${prNumber})` : ''}`);
+
+      // Get commits that are in head branch but not in base branch
+      const commitHashes = await this.getUniqueCommitsInBranch(baseBranch as string, headBranch as string);
+      
+      if (commitHashes.length === 0) {
+        log.warn('No unique commits found in PR branch');
+        return null;
+      }
+
+      const commits: PRCommitInfo[] = [];
+
+      // Process each commit individually to get its specific changes
+      for (let i = 0; i < commitHashes.length; i++) {
+        const hash = commitHashes[i];
+        if (!hash) continue; // Skip if hash is undefined
+        
+        const commitInfo = await this.getCommitInfo(hash);
+        
+        if (commitInfo) {
+          // Get changes introduced by this specific commit
+          const changes = await this.getCommitChanges(hash);
+          
+          commits.push({
+            hash: commitInfo.hash,
+            message: commitInfo.message,
+            author: commitInfo.author,
+            date: commitInfo.date,
+            changes: changes.changes,
+            order: i + 1 // Start from 1 (not 0) for human-readable ordering
+          });
+        }
+      }
+
+      return {
+        baseBranch: baseBranch as string,
+        headBranch: headBranch as string,
+        commits,
+        totalCommits: commits.length,
+        ...(prNumber && { prNumber })
+      };
+
+    } catch (error) {
+      log.error('Error analyzing PR commit sequence:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Detect PR context from GitHub Actions environment variables
+   */
+  private detectPRContext(): { baseBranch: string; headBranch: string; prNumber?: number } | null {
+    // GitHub Actions PR context
+    if (process.env.GITHUB_BASE_REF && process.env.GITHUB_HEAD_REF) {
+      const prNumber = this.extractPRNumber();
+      return {
+        baseBranch: process.env.GITHUB_BASE_REF,
+        headBranch: process.env.GITHUB_HEAD_REF,
+        ...(prNumber && { prNumber })
+      };
+    }
+
+    // GitHub Actions push event on PR branch
+    if (process.env.GITHUB_REF_NAME && process.env.GITHUB_REF_NAME !== 'main' && process.env.GITHUB_REF_NAME !== 'master') {
+      // Assume main as base branch for feature branches
+      const prNumber = this.extractPRNumber();
+      return {
+        baseBranch: 'main',
+        headBranch: process.env.GITHUB_REF_NAME,
+        ...(prNumber && { prNumber })
+      };
+    }
+
+    return null;
+  }
+
+  /**
+   * Extract PR number from GitHub environment variables
+   */
+  private extractPRNumber(): number | null {
+    // From GITHUB_REF (format: refs/pull/{pr_number}/merge or refs/pull/{pr_number}/head)
+    if (process.env.GITHUB_REF) {
+      const prMatch = process.env.GITHUB_REF.match(/^refs\/pull\/(\d+)\/(merge|head)$/);
+      if (prMatch && prMatch[1]) {
+        return parseInt(prMatch[1], 10);
+      }
+    }
+
+    // From GITHUB_EVENT_PATH (read the event.json file)
+    if (process.env.GITHUB_EVENT_PATH) {
+      try {
+        const fs = require('fs');
+        const eventData = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
+        if (eventData.pull_request?.number) {
+          return eventData.pull_request.number;
+        }
+      } catch (error) {
+        log.debug('Failed to read GitHub event data for PR number', { error: String(error) });
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * Get PR number from current context (useful for external callers)
+   */
+  getPRNumber(): number | null {
+    return this.extractPRNumber();
+  }
+
+  /**
+   * Get commits that exist in head branch but not in base branch
+   */
+  private async getUniqueCommitsInBranch(baseBranch: string, headBranch: string): Promise<string[]> {
+    try {
+      // Use git rev-list to get commits in head branch that are not in base branch
+      const result = await this.git.raw(['rev-list', '--reverse', `${baseBranch}..${headBranch}`]);
+      
+      return result
+        .split('\n')
+        .map(hash => hash.trim())
+        .filter(hash => hash.length > 0);
+    } catch (error) {
+      log.error(`Error getting unique commits between ${baseBranch} and ${headBranch}:`, error);
+      return [];
+    }
+  }
+
+  /**
+   * Check if current context is a PR (has unique commits to analyze)
+   */
+  async isPRContext(baseBranch?: string | undefined, headBranch?: string | undefined): Promise<boolean> {
+    const prContext = baseBranch && headBranch 
+      ? { baseBranch, headBranch }
+      : this.detectPRContext();
+    
+    if (!prContext) {
+      return false;
+    }
+
+    const uniqueCommits = await this.getUniqueCommitsInBranch(
+      prContext.baseBranch, 
+      prContext.headBranch
+    );
+    
+    return uniqueCommits.length > 0;
   }
 }
