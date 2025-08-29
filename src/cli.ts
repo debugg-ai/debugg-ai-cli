@@ -196,7 +196,14 @@ program
           details: { suiteUuid: result.suiteUuid } 
         } as any);
         systemLogger.info(`Test suite ID: ${result.suiteUuid}`);
-        process.exit(0);
+        
+        // Check if any tests failed (process.exitCode may have been set by reportResults)
+        if (process.exitCode === 1) {
+          systemLogger.error('Some tests failed - see results above');
+          process.exit(1);
+        } else {
+          process.exit(0);
+        }
       } else {
         systemLogger.error(`Tests failed: ${result.error}`);
         process.exit(1);
@@ -529,7 +536,13 @@ program
           systemLogger.info(`Test suite ID: ${result.testResult.suiteUuid}`);
         }
         
-        process.exit(0);
+        // Check if any tests failed (process.exitCode may have been set by reportResults)
+        if (process.exitCode === 1) {
+          systemLogger.error('Some tests failed - see results above');
+          process.exit(1);
+        } else {
+          process.exit(0);
+        }
       } else {
         systemLogger.error(`Workflow failed: ${result.error}`);
         process.exit(1);
