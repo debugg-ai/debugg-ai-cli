@@ -8,6 +8,7 @@ import { TestManager } from './lib/test-manager';
 import { WorkflowOrchestrator } from './lib/workflow-orchestrator';
 import { systemLogger } from './util/system-logger';
 import { randomUUID } from 'crypto';
+import { telemetry } from './services/telemetry';
 
 // Load environment variables
 config();
@@ -30,6 +31,7 @@ program
   .option('--commit-range <range>', 'Commit range to analyze (e.g., HEAD~3..HEAD, main..feature-branch)')
   .option('--since <date>', 'Analyze commits since date/time (e.g., "2024-01-01", "2 days ago")')
   .option('--last <number>', 'Analyze last N commits (e.g., --last 3)')
+  .option('--pr <number>', 'PR number for GitHub App-based testing (requires GitHub App integration)')
   .option('--pr-sequence', 'Enable PR commit sequence testing (sends individual test requests for each commit in PR)')
   .option('--base-branch <branch>', 'Base branch for PR testing (auto-detected from GitHub env if not provided)')
   .option('--head-branch <branch>', 'Head branch for PR testing (auto-detected from GitHub env if not provided)')
@@ -45,6 +47,9 @@ program
   .option('--no-color', 'Disable colored output')
   .action(async (options) => {
     try {
+      // Track command start
+      telemetry.trackCommandStart('test', options);
+      
       // Set up logging mode based on flags
       if (options.dev) {
         systemLogger.setDevMode(true);
@@ -126,7 +131,9 @@ program
           // PR sequence options
           prSequence: options.prSequence || false,
           baseBranch: options.baseBranch,
-          headBranch: options.headBranch
+          headBranch: options.headBranch,
+          // GitHub App PR testing
+          ...(options.pr && { pr: parseInt(options.pr) })
         }, options.tunnelUuid, parseInt(options.tunnelPort) || 3000);
       } else {
         // Standard mode with tunnel key for backend tunnel creation
@@ -149,7 +156,9 @@ program
           // PR sequence options
           prSequence: options.prSequence || false,
           baseBranch: options.baseBranch,
-          headBranch: options.headBranch
+          headBranch: options.headBranch,
+          // GitHub App PR testing
+          ...(options.pr && { pr: parseInt(options.pr) })
         });
       }
 
@@ -215,12 +224,15 @@ program
         throw error;
       }
       
-      systemLogger.error('Unexpected error: ' + (error instanceof Error ? error.message : String(error)));
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      systemLogger.error('Unexpected error: ' + errorMsg);
       
       if (process.env.DEBUG) {
         systemLogger.error('Stack trace: ' + (error as any)?.stack);
       }
       
+      telemetry.trackCommandComplete('test', false, errorMsg);
+      await telemetry.shutdown();
       process.exit(1);
     }
   });
@@ -235,6 +247,9 @@ program
   .option('--no-color', 'Disable colored output')
   .action(async (options) => {
     try {
+      // Track command start
+      telemetry.trackCommandStart('status', options);
+      
       // Set up development mode
       if (options.dev) {
         process.env.DEBUGGAI_LOG_LEVEL = 'DEBUG';
@@ -284,6 +299,10 @@ program
           console.log(`  • ${test.name || test.uuid}: ${getStatusColor(status)}`);
         }
       }
+      
+      // Track successful completion
+      telemetry.trackCommandComplete('status', true);
+      await telemetry.shutdown();
 
     } catch (error) {
       // Re-throw test exit errors to prevent them from being handled
@@ -291,7 +310,10 @@ program
         throw error;
       }
       
-      systemLogger.error('Error checking status: ' + (error instanceof Error ? error.message : String(error)));
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      systemLogger.error('Error checking status: ' + errorMsg);
+      telemetry.trackCommandComplete('status', false, errorMsg);
+      await telemetry.shutdown();
       process.exit(1);
     }
   });
@@ -309,6 +331,9 @@ program
   .option('--no-color', 'Disable colored output')
   .action(async (options) => {
     try {
+      // Track command start
+      telemetry.trackCommandStart('list', options);
+      
       // Set up development mode
       if (options.dev) {
         process.env.DEBUGGAI_LOG_LEVEL = 'DEBUG';
@@ -360,6 +385,10 @@ program
         console.log(`  UUID: ${suite.uuid}`);
         console.log('');
       }
+      
+      // Track successful completion
+      telemetry.trackCommandComplete('list', true);
+      await telemetry.shutdown();
 
     } catch (error) {
       // Re-throw test exit errors to prevent them from being handled
@@ -367,7 +396,10 @@ program
         throw error;
       }
       
-      systemLogger.error('Error listing test suites: ' + (error instanceof Error ? error.message : String(error)));
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      systemLogger.error('Error listing test suites: ' + errorMsg);
+      telemetry.trackCommandComplete('list', false, errorMsg);
+      await telemetry.shutdown();
       process.exit(1);
     }
   });
@@ -505,7 +537,9 @@ program
           // PR sequence options
           prSequence: options.prSequence || false,
           baseBranch: options.baseBranch,
-          headBranch: options.headBranch
+          headBranch: options.headBranch,
+          // GitHub App PR testing
+          ...(options.pr && { pr: parseInt(options.pr) })
         },
         cleanup: {
           onSuccess: options.cleanupOnSuccess,

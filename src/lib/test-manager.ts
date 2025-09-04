@@ -5,6 +5,7 @@ import * as fs from 'fs-extra';
 import * as path from 'path';
 import chalk from 'chalk';
 import { systemLogger } from '../util/system-logger';
+import { telemetry } from '../services/telemetry';
 
 export interface TestManagerOptions {
   apiKey: string;
@@ -23,6 +24,7 @@ export interface TestManagerOptions {
   since?: string; // Commits since date/time
   last?: number; // Last N commits
   // PR testing options
+  pr?: number; // PR number for GitHub App-based testing (sends single request, backend handles analysis)
   prSequence?: boolean; // Enable PR commit sequence testing (sends individual test requests per commit)
   baseBranch?: string | undefined; // Base branch for PR testing (auto-detected from GitHub env if not provided)
   headBranch?: string | undefined; // Head branch for PR testing (auto-detected from GitHub env if not provided)
@@ -62,6 +64,7 @@ export class TestManager {
   private client: CLIBackendClient;
   private gitAnalyzer: GitAnalyzer;
   private tunnelManager?: TunnelManager;
+  private tunnelInfo?: TunnelInfo;
   private options: TestManagerOptions;
 
   constructor(options: TestManagerOptions) {
@@ -128,6 +131,7 @@ export class TestManager {
    * Run tests for the current commit or working changes
    */
   async runCommitTests(): Promise<TestResult> {
+    const testStartTime = Date.now();
     systemLogger.info('Starting test analysis and generation', { category: 'test' });
 
     try {
@@ -149,6 +153,12 @@ export class TestManager {
       }
 
       systemLogger.api.auth(true, authTest.user?.email || authTest.user?.id);
+
+      // Step 3.4: Check if GitHub App PR testing is enabled
+      if (this.options.pr) {
+        systemLogger.info(`GitHub App PR testing enabled - PR #${this.options.pr}`, { category: 'test' });
+        return await this.runGitHubAppPRTest();
+      }
 
       // Step 3.5: Check if PR sequence testing is enabled
       if (this.options.prSequence) {
@@ -176,6 +186,19 @@ export class TestManager {
       }
 
       systemLogger.info(`Found ${changes.changes.length} changed files`, { category: 'git' });
+      
+      // Track test execution start
+      const executionType = this.options.pr ? 'pr' : 
+                          this.options.prSequence ? 'pr-sequence' :
+                          this.options.commit ? 'commit' : 'working';
+      telemetry.trackTestStart(executionType, {
+        filesChanged: changes.changes.length,
+        branch: changes.branchInfo.branch,
+        hasCommit: !!this.options.commit,
+        hasCommitRange: !!this.options.commitRange,
+        hasSince: !!this.options.since,
+        hasLast: !!this.options.last
+      });
 
       // Step 7: Submit test request
       systemLogger.info('Creating test suite', { category: 'test' });
@@ -255,12 +278,22 @@ export class TestManager {
             response.tunnelKey       // ngrok auth token from backend
           );
           
+          // Store tunnel info for later use
+          this.tunnelInfo = tunnelInfo;
+          
           systemLogger.tunnel.connected(tunnelInfo.url);
           systemLogger.success(`TUNNEL ACTIVE: ${tunnelInfo.url} -> localhost:${tunnelPort}`);
+          
+          // Track successful tunnel creation
+          telemetry.trackTunnelCreation(true, tunnelPort);
         } catch (error) {
-          systemLogger.error(`TUNNEL FAILED: ${error instanceof Error ? error.message : 'Unknown error'}`);
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          systemLogger.error(`TUNNEL FAILED: ${errorMsg}`);
           systemLogger.warn('Tests will proceed without tunnel - ensure your server is accessible at the expected URL');
           systemLogger.warn(`Expected backend URL: https://${this.options.tunnelKey}.ngrok.debugg.ai`);
+          
+          // Track tunnel creation failure
+          telemetry.trackTunnelCreation(false, tunnelPort, errorMsg);
         }
       } else {
         // Log why tunnel wasn't created
@@ -309,9 +342,24 @@ export class TestManager {
 
       if (this.options.downloadArtifacts) {
         systemLogger.success(`Tests completed successfully! Generated ${testFiles.length} test files`);
+        telemetry.trackArtifactDownload('test_files', true, testFiles.length);
       } else {
         systemLogger.success('Tests completed successfully! (artifacts not downloaded - use --download-artifacts to save test files)');
       }
+      
+      // Track test completion
+      const testsGenerated = completedSuite.tests?.length || 0;
+      const testExecutionType = this.options.pr ? 'pr' : 
+                          this.options.prSequence ? 'pr-sequence' :
+                          this.options.commit ? 'commit' : 'working';
+      telemetry.trackTestComplete({
+        suiteUuid: response.testSuiteUuid,
+        duration: Date.now() - testStartTime,
+        filesChanged: changes.changes.length,
+        testsGenerated,
+        success: true,
+        executionType: testExecutionType
+      });
 
       const result: TestResult = {
         success: true,
@@ -335,6 +383,20 @@ export class TestManager {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       systemLogger.error(`Test run failed: ${errorMsg}`);
       
+      // Track test failure
+      const failureExecutionType = this.options.pr ? 'pr' : 
+                          this.options.prSequence ? 'pr-sequence' :
+                          this.options.commit ? 'commit' : 'working';
+      telemetry.trackTestComplete({
+        suiteUuid: '',
+        duration: Date.now() - testStartTime,
+        filesChanged: 0,
+        testsGenerated: 0,
+        success: false,
+        error: errorMsg,
+        executionType: failureExecutionType
+      });
+      
       return {
         success: false,
         error: errorMsg
@@ -350,6 +412,101 @@ export class TestManager {
         }
       }
       
+    }
+  }
+
+  /**
+   * Run GitHub App-based PR test - sends single request with PR number
+   * Backend handles all git analysis via GitHub App integration
+   */
+  async runGitHubAppPRTest(): Promise<TestResult> {
+    try {
+      // Get current branch name
+      const branchInfo = await this.gitAnalyzer.getCurrentBranchInfo();
+      
+      systemLogger.info(`Submitting PR #${this.options.pr} for GitHub App-based testing`, { category: 'test' });
+      systemLogger.info(`Branch: ${branchInfo.branch}`, { category: 'git' });
+      
+      // Create test request for GitHub App PR testing
+      const testRequest: any = {
+        type: 'pull_request',
+        repoName: this.gitAnalyzer.getRepoName(),
+        repoPath: this.options.repoPath,
+        branch: branchInfo.branch,
+        pr_number: this.options.pr,
+        commitHash: branchInfo.commitHash,
+        testDescription: `Automated E2E tests for PR #${this.options.pr}`
+      };
+
+      // Add tunnel configuration if applicable
+      if (this.options.tunnelUrl) {
+        testRequest.tunnelUrl = this.options.tunnelUrl;
+      }
+
+      if (this.options.tunnelMetadata) {
+        testRequest.tunnelMetadata = this.options.tunnelMetadata;
+      }
+
+      if (this.options.tunnelKey) {
+        testRequest.tunnelKey = this.options.tunnelKey;
+      }
+
+      // Submit test request
+      systemLogger.info('Submitting PR test request to backend', { category: 'api' });
+      const createResult = await this.client.createCommitTestSuite(testRequest);
+      
+      if (!createResult.success || !createResult.testSuiteUuid) {
+        throw new Error(createResult.error || 'Failed to create test suite');
+      }
+
+      const suiteUuid = createResult.testSuiteUuid;
+      systemLogger.info(`Test suite created: ${suiteUuid}`, { category: 'test' });
+
+      // Wait for test completion
+      systemLogger.info('Waiting for test execution', { category: 'test' });
+      const suite = await this.client.waitForCommitTestSuiteCompletion(suiteUuid, {
+        maxWaitTime: this.options.maxTestWaitTime || 600000,
+        pollInterval: 5000
+      });
+      
+      if (!suite) {
+        throw new Error('Test suite failed or timed out');
+      }
+
+      // Download artifacts if requested
+      let downloadedFiles: string[] = [];
+      if (this.options.downloadArtifacts && suite.status === 'completed') {
+        systemLogger.info('Downloading test artifacts', { category: 'test' });
+        downloadedFiles = await this.saveTestArtifacts(suite);
+      }
+
+      systemLogger.success(`GitHub App PR test completed for PR #${this.options.pr}`);
+      
+      const result: TestResult = {
+        success: true,
+        suiteUuid,
+        suite,
+        testFiles: downloadedFiles
+      };
+      
+      // Add optional fields only if they have values
+      if (this.options.tunnelKey) {
+        result.tunnelKey = this.options.tunnelKey;
+      }
+      
+      if (this.tunnelInfo) {
+        result.tunnelInfo = this.tunnelInfo;
+      }
+      
+      return result;
+      
+    } catch (error: any) {
+      const errorMsg = error.message || 'Unknown error occurred';
+      systemLogger.error(`GitHub App PR test failed: ${errorMsg}`);
+      return {
+        success: false,
+        error: errorMsg
+      };
     }
   }
 

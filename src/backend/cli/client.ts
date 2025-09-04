@@ -135,9 +135,11 @@ export class CLIBackendClient {
      * This matches the functionality expected by TestManager
      */
     async createCommitTestSuite(request: {
+        type?: 'pull_request' | 'commit'; // Type of test request
         repoName: string;
         repoPath: string;
-        branchName: string;
+        branchName?: string; // Made optional for PR testing
+        branch?: string; // Alternative field name for PR testing  
         commitHash?: string;
         workingChanges?: Array<{
             status: string;
@@ -147,6 +149,7 @@ export class CLIBackendClient {
         }>;
         testDescription: string;
         key?: string; // Tunnel UUID for custom endpoints (e.g., <uuid>.debugg.ai)
+        tunnelKey?: string; // Alternative field name
         publicUrl?: string;
         testEnvironment?: {
             url: string;
@@ -154,27 +157,45 @@ export class CLIBackendClient {
             port?: number;
             metadata?: Record<string, any>;
         };
+        tunnelUrl?: string; // Alternative field for PR testing
+        tunnelMetadata?: Record<string, any>; // Alternative field for PR testing
         context?: Record<string, any>;
         prNumber?: number; // Pull request number for GitHub integrations
+        pr_number?: number; // Alternative field name for PR testing
     }): Promise<{ success: boolean; testSuiteUuid?: string; tunnelKey?: string; error?: string }> {
         try {
             await this.ensureInitialized();
             
             log.info('Creating commit test suite');
             
-            // Use the proven backend service to create commit suite
-            const commitSuite = await this.e2es.createE2eCommitSuite(request.testDescription, {
-                key: request.key, // Tunnel UUID for custom endpoints
+            // Prepare request payload based on type
+            const payload: any = {
+                key: request.key || request.tunnelKey, // Support both field names
                 repoName: request.repoName,
                 repoPath: request.repoPath,
-                branchName: request.branchName,
+                branchName: request.branchName || request.branch, // Support both field names
                 commitHash: request.commitHash,
-                workingChanges: request.workingChanges,
-                publicUrl: request.publicUrl,
-                testEnvironment: request.testEnvironment,
-                prNumber: request.prNumber,
+                publicUrl: request.publicUrl || request.tunnelUrl,
+                testEnvironment: request.testEnvironment || (request.tunnelUrl ? {
+                    url: request.tunnelUrl,
+                    type: 'ngrok_tunnel' as const,
+                    metadata: request.tunnelMetadata
+                } : undefined),
+                prNumber: request.prNumber || request.pr_number, // Support both field names
                 ...request.context
-            });
+            };
+
+            // For GitHub App PR testing, send minimal payload
+            if (request.type === 'pull_request') {
+                payload.type = 'pull_request';
+                // Don't send workingChanges for PR type - backend will fetch via GitHub App
+            } else {
+                // For regular commit testing, include working changes
+                payload.workingChanges = request.workingChanges;
+            }
+            
+            // Use the proven backend service to create commit suite
+            const commitSuite = await this.e2es.createE2eCommitSuite(request.testDescription, payload);
 
             if (commitSuite?.uuid) {
                 return {
