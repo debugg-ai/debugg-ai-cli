@@ -202,9 +202,10 @@ jobs:
         echo "✅ All CLI commands accessible"
 
     - name: Test programmatic API
+      timeout-minutes: 1
       run: |
         echo "Testing programmatic API..."
-        if node -e "const { DEFAULT_CONFIG, ENV_VARS, runDebuggAITests } = require('./dist/index.js'); console.log('✅ API loaded successfully:', Object.keys({ DEFAULT_CONFIG, ENV_VARS, runDebuggAITests }));"; then
+        if node -e "const { DEFAULT_CONFIG, ENV_VARS, runDebuggAITests } = require('./dist/index.js'); console.log('✅ API loaded successfully:', Object.keys({ DEFAULT_CONFIG, ENV_VARS, runDebuggAITests })); process.exit(0);"; then
           echo "✅ Programmatic API works"
           echo "CLI_TESTS_PASSED=true" >> $GITHUB_ENV
         else

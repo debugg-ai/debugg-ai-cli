@@ -41,13 +41,15 @@ export class TelemetryService {
   private userId: string;
   private sessionId: string;
   private enabled: boolean = true;
+  private initialized: boolean = false;
   private commandStartTime: number = 0;
   private testStartTime: number = 0;
 
   private constructor() {
     this.userId = this.getOrCreateUserId();
     this.sessionId = this.generateSessionId();
-    this.initializePostHog();
+    // Lazy initialization - only initialize when actually used
+    // This prevents hanging in CI when just loading the module
   }
 
   /**
@@ -61,12 +63,17 @@ export class TelemetryService {
   }
 
   /**
-   * Initialize PostHog client
+   * Initialize PostHog client (lazy initialization)
    */
   private initializePostHog(): void {
+    if (this.initialized) return;
+    this.initialized = true;
+    
     try {
       // Check if telemetry is disabled via environment variable
-      if (process.env.DEBUGGAI_TELEMETRY_DISABLED === 'true' || process.env.DO_NOT_TRACK === '1') {
+      if (process.env.DEBUGGAI_TELEMETRY_DISABLED === 'true' || 
+          process.env.DO_NOT_TRACK === '1' ||
+          process.env.CI === 'true') { // Disable in CI by default
         this.enabled = false;
         return;
       }
@@ -141,9 +148,19 @@ export class TelemetryService {
   }
 
   /**
+   * Ensure PostHog is initialized before use
+   */
+  private ensureInitialized(): void {
+    if (!this.initialized) {
+      this.initializePostHog();
+    }
+  }
+
+  /**
    * Identify the user with properties
    */
   identify(properties: Record<string, any>): void {
+    this.ensureInitialized();
     if (!this.enabled || !this.posthog) return;
 
     try {
@@ -163,6 +180,7 @@ export class TelemetryService {
    * Track a custom event
    */
   track(event: string, properties?: Record<string, any>): void {
+    this.ensureInitialized();
     if (!this.enabled || !this.posthog) return;
 
     try {
@@ -342,5 +360,23 @@ export class TelemetryService {
   }
 }
 
-// Export singleton instance
-export const telemetry = TelemetryService.getInstance();
+// Export singleton getter to delay instantiation
+export const telemetry = {
+  trackCommandStart: (command: string, options: Record<string, any>) => 
+    TelemetryService.getInstance().trackCommandStart(command, options),
+  trackCommandComplete: (command: string, success: boolean, error?: string) =>
+    TelemetryService.getInstance().trackCommandComplete(command, success, error),
+  trackTestStart: (executionType: string, metadata?: Record<string, any>) =>
+    TelemetryService.getInstance().trackTestStart(executionType, metadata),
+  trackTestComplete: (metrics: TestExecutionMetrics) =>
+    TelemetryService.getInstance().trackTestComplete(metrics),
+  trackApiError: (endpoint: string, statusCode: number, error: string) =>
+    TelemetryService.getInstance().trackApiError(endpoint, statusCode, error),
+  trackFeatureUsage: (feature: string, metadata?: Record<string, any>) =>
+    TelemetryService.getInstance().trackFeatureUsage(feature, metadata),
+  trackTunnelCreation: (success: boolean, port?: number, error?: string) =>
+    TelemetryService.getInstance().trackTunnelCreation(success, port, error),
+  trackArtifactDownload: (type: string, success: boolean, count?: number) =>
+    TelemetryService.getInstance().trackArtifactDownload(type, success, count),
+  shutdown: () => TelemetryService.getInstance().shutdown()
+};
