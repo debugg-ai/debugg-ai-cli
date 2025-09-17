@@ -13,12 +13,17 @@ import { telemetry } from './services/telemetry';
 // Load environment variables
 config();
 
+// Read version from package.json
+const packageJsonPath = path.join(__dirname, '..', 'package.json');
+const packageJson = fs.readJsonSync(packageJsonPath);
+const version = packageJson.version;
+
 const program = new Command();
 
 program
   .name('@debugg-ai/cli')
   .description('CLI tool for running DebuggAI tests in CI/CD environments')
-  .version('1.0.0');
+  .version(version);
 
 program
   .command('test')
