@@ -17,6 +17,7 @@ export interface TestManagerOptions {
   maxTestWaitTime?: number;
   tunnelUrl?: string;
   tunnelMetadata?: Record<string, any> | undefined;
+  fallbackUrl?: string; // Fallback URL to use if tunnel creation fails
   downloadArtifacts?: boolean; // Whether to download test artifacts (scripts, recordings, etc.) - defaults to false
   // Commit analysis options
   commit?: string; // Specific commit hash
@@ -248,13 +249,15 @@ export class TestManager {
 
       // Step 7.5: Create tunnel if requested and backend provided tunnelKey
       let tunnelInfo: TunnelInfo | undefined;
-      systemLogger.debug('Tunnel setup', { 
+      systemLogger.debug('Tunnel setup', {
         category: 'tunnel',
-        details: { 
+        details: {
           createTunnel: this.options.createTunnel,
           tunnelKey: this.options.tunnelKey,
-          backendTunnelKey: response.tunnelKey
-        } 
+          tunnelKeyLength: this.options.tunnelKey?.length,
+          backendTunnelKey: response.tunnelKey ? 'PROVIDED' : 'NOT_PROVIDED',
+          backendTunnelKeyLength: response.tunnelKey?.length
+        }
       });
       if (response.tunnelKey && this.options.tunnelKey) {
         systemLogger.info('Setting up ngrok tunnel', { category: 'tunnel' });
@@ -263,7 +266,17 @@ export class TestManager {
         systemLogger.info(`Expected URL: https://${this.options.tunnelKey}.ngrok.debugg.ai`);
         systemLogger.info(`Local port: ${this.options.tunnelPort || 3000}`);
         systemLogger.info(`Backend provided tunnelKey: ${response.tunnelKey ? '✓ YES' : '✗ NO'}`);
-        
+
+        if (response.tunnelKey) {
+          systemLogger.debug('Tunnel key details', {
+            category: 'tunnel',
+            details: {
+              keyLength: response.tunnelKey.length,
+              keyPrefix: response.tunnelKey.substring(0, 8) + '...'
+            }
+          });
+        }
+
         if (!this.tunnelManager) {
           throw new Error('Tunnel manager not initialized. This should not happen.');
         }

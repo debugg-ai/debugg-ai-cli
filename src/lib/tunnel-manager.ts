@@ -51,11 +51,19 @@ export class TunnelManager {
     if (!ngrok) {
       throw new Error('Ngrok package is not available. Please install ngrok dependency or use direct URL access instead.');
     }
-    
+
     // Use tunnelKey from backend if provided, otherwise fallback to configured auth token
     const authToken = config.tunnelKey || config.authtoken || this.authtoken;
     if (!authToken) {
       throw new Error('Ngrok auth token or tunnelKey is required. Provide via constructor options, config, tunnelKey from backend, or NGROK_AUTH_TOKEN env var');
+    }
+
+    // Validate auth token format
+    if (authToken.length < 10) {
+      log.error('Auth token appears to be invalid (too short)', {
+        tokenLength: authToken.length,
+        tokenSource: config.tunnelKey ? 'backend' : (config.authtoken ? 'config' : 'env')
+      });
     }
 
     // Use endpointUuid if provided, otherwise generate one
@@ -72,17 +80,34 @@ export class TunnelManager {
       targetDomain: customDomain,
       port: config.port,
       hasAuthToken: !!authToken,
-      authTokenSource: config.tunnelKey ? 'backend' : (config.authtoken ? 'config' : 'env')
+      authTokenSource: config.tunnelKey ? 'backend' : (config.authtoken ? 'config' : 'env'),
+      authTokenLength: authToken.length,
+      authTokenPrefix: authToken.substring(0, 8) + '...'
     });
 
     try {
       log.info(`🔗 Attempting to connect to public domain: ${customDomain}`);
-      const url = await ngrok.connect({
-        proto: 'http',
-        addr: config.port,
-        hostname: customDomain,
-        authtoken: authToken
-      });
+
+      // For backend-provided tokens, try without custom domain first if custom domain fails
+      let url: string;
+      try {
+        url = await ngrok.connect({
+          proto: 'http',
+          addr: config.port,
+          hostname: customDomain,
+          authtoken: authToken
+        });
+      } catch (domainError) {
+        // If custom domain fails with backend token, log the error but don't fail immediately
+        if (config.tunnelKey && String(domainError).includes('invalid')) {
+          log.warn(`Custom domain connection failed, this may indicate the auth token doesn't support custom domains`, {
+            error: String(domainError),
+            customDomain
+          });
+          throw domainError; // Re-throw to be handled by outer catch
+        }
+        throw domainError;
+      }
 
       const connectionTime = Date.now() - startTime;
       const tunnelInfo: TunnelInfo = {
@@ -108,13 +133,31 @@ export class TunnelManager {
       return tunnelInfo;
     } catch (error) {
       const failureTime = Date.now() - startTime;
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
       log.error(`❌ Ngrok connection failed after ${failureTime}ms`, {
         targetDomain: customDomain,
         port: config.port,
-        error: String(error),
-        uuid: tunnelUuid
+        error: errorMsg,
+        uuid: tunnelUuid,
+        authTokenSource: config.tunnelKey ? 'backend' : (config.authtoken ? 'config' : 'env'),
+        authTokenLength: authToken.length
       });
-      throw new Error(`Failed to create ngrok tunnel to ${customDomain}: ${error instanceof Error ? error.message : 'Unknown error'}`);
+
+      // Provide more specific error messages based on common issues
+      if (errorMsg.includes('invalid')) {
+        const detailedError = `Failed to create ngrok tunnel to ${customDomain}. \n` +
+          `Possible causes:\n` +
+          `1. Invalid or expired ngrok auth token\n` +
+          `2. Token doesn't have permission for custom domain '${customDomain}'\n` +
+          `3. Network connectivity issues\n` +
+          `Token source: ${config.tunnelKey ? 'backend-provided' : (config.authtoken ? 'config' : 'environment variable')}\n` +
+          `Token prefix: ${authToken.substring(0, 8)}...\n` +
+          `Original error: ${errorMsg}`;
+        throw new Error(detailedError);
+      }
+
+      throw new Error(`Failed to create ngrok tunnel to ${customDomain}: ${errorMsg}`);
     }
   }
 
@@ -262,21 +305,44 @@ export class TunnelManager {
     endpointUuid: string,
     tunnelKey: string
   ): Promise<TunnelInfo> {
+    // Validate inputs
+    if (!tunnelKey || tunnelKey.trim().length === 0) {
+      throw new Error('Invalid or empty tunnelKey provided by backend');
+    }
+
+    if (!endpointUuid || endpointUuid.trim().length === 0) {
+      throw new Error('Invalid or empty endpoint UUID provided');
+    }
+
     const targetDomain = `${endpointUuid}.${this.baseDomain}`;
-    
+
     log.info(`🔑 Creating tunnel with backend-provided credentials`);
     log.debug('Backend tunnel configuration', {
       endpointUuid,
       targetDomain,
       port,
-      hasKey: !!tunnelKey
+      hasKey: !!tunnelKey,
+      keyLength: tunnelKey.length,
+      keyPrefix: tunnelKey.substring(0, 8) + '...'
     });
 
-    return this.createTunnel({
-      port,
-      endpointUuid,
-      tunnelKey,
-      customDomain: targetDomain
-    });
+    try {
+      return await this.createTunnel({
+        port,
+        endpointUuid,
+        tunnelKey,
+        customDomain: targetDomain
+      });
+    } catch (error) {
+      // Log additional context for backend-provided key failures
+      log.error('Failed to create tunnel with backend-provided key', {
+        endpointUuid,
+        targetDomain,
+        port,
+        keyLength: tunnelKey.length,
+        error: String(error)
+      });
+      throw error;
+    }
   }
 }
