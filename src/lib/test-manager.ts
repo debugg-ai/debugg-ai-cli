@@ -17,7 +17,6 @@ export interface TestManagerOptions {
   maxTestWaitTime?: number;
   tunnelUrl?: string;
   tunnelMetadata?: Record<string, any> | undefined;
-  fallbackUrl?: string; // Fallback URL to use if tunnel creation fails
   downloadArtifacts?: boolean; // Whether to download test artifacts (scripts, recordings, etc.) - defaults to false
   // Commit analysis options
   commit?: string; // Specific commit hash
