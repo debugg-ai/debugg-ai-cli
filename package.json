@@ -57,11 +57,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/debugg-ai/debugg-ai-extensions.git",
+    "url": "https://github.com/debugg-ai/debugg-ai-cli.git",
     "directory": "debugg-ai-cli"
   },
   "bugs": {
-    "url": "https://github.com/debugg-ai/debugg-ai-extensions/issues"
+    "url": "https://github.com/debugg-ai/debugg-ai-cli/issues"
   },
-  "homepage": "https://github.com/debugg-ai/debugg-ai-extensions/tree/main/debugg-ai-cli#readme"
+  "homepage": "https://debugg.ai"
 }
