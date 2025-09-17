@@ -1,6 +1,6 @@
 {
   "name": "@debugg-ai/cli",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "CLI tool for running DebuggAI tests in CI/CD environments",
   "main": "dist/index.js",
   "bin": {
