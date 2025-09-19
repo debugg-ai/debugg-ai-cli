@@ -230,19 +230,32 @@ class TunnelManager {
     try {
       // Get ngrok module dynamically
       const ngrok = await getNgrok();
-      
-      // Set auth token first
-      logger.info(`Setting ngrok auth token`);
-      await ngrok.authtoken({ authtoken: authToken });
-      
-      // Kill any existing ngrok process to ensure clean state
+
+      // Kill any existing ngrok process BEFORE setting auth token to ensure clean state
       try {
-        logger.debug(`Killing any existing ngrok processes`);
+        logger.debug(`Checking for existing ngrok processes`);
+        // Try to disconnect all existing tunnels first
+        try {
+          await ngrok.disconnect(); // Disconnect all tunnels
+          logger.debug(`Disconnected all existing tunnels`);
+        } catch (disconnectErr) {
+          logger.debug(`No tunnels to disconnect: ${disconnectErr}`);
+        }
+
+        // Then kill the ngrok process
         await ngrok.kill();
+        logger.info(`Killed existing ngrok process`);
+
+        // Wait a bit for the process to fully terminate
+        await new Promise(resolve => setTimeout(resolve, 1000));
       } catch (killError) {
         // Ignore error - ngrok might not be running
         logger.debug(`No existing ngrok process to kill: ${killError}`);
       }
+
+      // Set auth token after killing any existing processes
+      logger.info(`Setting ngrok auth token`);
+      await ngrok.authtoken({ authtoken: authToken });
 
       // Create tunnel options
       const tunnelOptions = {
@@ -254,19 +267,41 @@ class TunnelManager {
         onLogEvent: (data: any) => {console.log('onLogEvent', data)}, // returns stdout messages from ngrok process
         // Don't override configPath - let ngrok use its default configuration
       };
-      
-      logger.info(`Connecting tunnel with options: ${JSON.stringify({ ...tunnelOptions, authtoken: '[REDACTED]' })}`);
-      
-      // For ngrok v5, we might need to handle the connection differently
-      let tunnelUrl: string;
-      try {
-        tunnelUrl = await ngrok.connect(tunnelOptions);
-      } catch (connectError) {
-        logger.error(`Failed to create tunnel:`, connectError);
-        throw connectError;
+
+      logger.info(`Connecting tunnel with options: ${JSON.stringify({ ...tunnelOptions, authtoken: '[REDACTED]', name: tunnelId })}`);
+
+      // Add retry logic for tunnel connection
+      let tunnelUrl: string | undefined;
+      let lastError: any;
+      const MAX_RETRIES = 3;
+      const RETRY_DELAY = 2000;
+
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          logger.debug(`Tunnel connection attempt ${attempt}/${MAX_RETRIES}`);
+          tunnelUrl = await ngrok.connect(tunnelOptions);
+          break; // Success - exit the retry loop
+        } catch (connectError) {
+          lastError = connectError;
+          logger.warn(`Tunnel connection attempt ${attempt} failed:`, connectError);
+
+          if (attempt < MAX_RETRIES) {
+            logger.info(`Retrying in ${RETRY_DELAY}ms...`);
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+
+            // Try to clean up before retry
+            try {
+              await ngrok.disconnect();
+            } catch (disconnectErr) {
+              logger.debug(`Cleanup before retry failed: ${disconnectErr}`);
+            }
+          }
+        }
       }
+
       if (!tunnelUrl) {
-        throw new Error('Failed to create tunnel');
+        logger.error(`Failed to create tunnel after ${MAX_RETRIES} attempts:`, lastError);
+        throw lastError || new Error('Failed to create tunnel');
       }
       
       // Generate the public URL maintaining path, search, and hash from original
