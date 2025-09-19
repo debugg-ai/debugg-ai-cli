@@ -4,10 +4,8 @@ import { Command } from 'commander';
 import * as path from 'path';
 import * as fs from 'fs-extra';
 import { config } from 'dotenv';
-import { TestManager } from './lib/test-manager';
-import { WorkflowOrchestrator } from './lib/workflow-orchestrator';
+import { E2EManager } from './lib/e2e-manager';
 import { systemLogger } from './util/system-logger';
-import { randomUUID } from 'crypto';
 import { telemetry } from './services/telemetry';
 
 // Load environment variables
@@ -41,11 +39,9 @@ program
   .option('--base-branch <branch>', 'Base branch for PR testing (auto-detected from GitHub env if not provided)')
   .option('--head-branch <branch>', 'Head branch for PR testing (auto-detected from GitHub env if not provided)')
   .option('--wait-for-server', 'Wait for local development server to be ready')
-  .option('--server-port <port>', 'Local server port to wait for (default: 3000)', '3000')
+  .option('--server-port <port>', 'Local server port to test', '3000')
   .option('--server-timeout <ms>', 'Server wait timeout in milliseconds (default: 60000)', '60000')
   .option('--max-test-time <ms>', 'Maximum test wait time in milliseconds (default: 600000)', '600000')
-  .option('--tunnel-uuid <uuid>', 'Create ngrok tunnel with custom UUID endpoint (e.g., <uuid>.debugg.ai)')
-  .option('--tunnel-port <port>', 'Port to tunnel (default: 3000)', '3000')
   .option('--download-artifacts', 'Download test artifacts (scripts, recordings, JSON results) to local filesystem')
   .option('-v, --verbose', 'Enable verbose logging for debugging')
   .option('--dev', 'Enable development logging (shows all technical details, tunnel info, API calls, git details, timing)')
@@ -97,79 +93,53 @@ program
         process.exit(1);
       }
 
-      systemLogger.debug('CLI configuration', { 
+      // Log configuration details for debugging
+      const serverPort = parseInt(options.serverPort || '3000');
+
+      systemLogger.debug('CLI configuration', {
         category: 'cli',
-        details: { repoPath, apiKey: `${apiKey.substring(0, 8)}...` } 
+        details: {
+          repoPath,
+          apiKey: `${apiKey.substring(0, 8)}...`,
+          serverPort: serverPort,
+          waitForServer: options.waitForServer || false,
+          baseUrl: options.baseUrl || 'https://api.debugg.ai'
+        }
       } as any);
 
-      // Generate a tunnel key for backend to create tunnel endpoints
-      const tunnelKey = randomUUID();
-      systemLogger.debug('Generated tunnel key', { 
-        category: 'tunnel',
-        details: { key: tunnelKey.substring(0, 8) + '...' } 
-      } as any);
-      
-      // Initialize test manager (after all validations pass)
-      let testManager: TestManager;
-      
-      if (options.tunnelUuid) {
-        // Use new auto-tunnel flow where backend provides ngrok token after commit suite creation
-        systemLogger.debug('Using auto-tunnel mode', { 
-          category: 'tunnel',
-          details: { uuid: options.tunnelUuid } 
-        } as any);
-        systemLogger.info(`Using auto-tunnel mode with UUID: ${options.tunnelUuid}`);
-        testManager = TestManager.withAutoTunnel({
-          apiKey,
-          repoPath,
-          baseUrl: options.baseUrl,
-          ...(options.outputDir && { testOutputDir: options.outputDir }),
-          serverTimeout: parseInt(options.serverTimeout) || 60000,
-          maxTestWaitTime: parseInt(options.maxTestTime) || 600000,
-          downloadArtifacts: options.downloadArtifacts || false,
-          tunnelKey, // Pass the generated tunnel key
-          // Commit analysis options
-          commit: options.commit,
-          commitRange: options.commitRange,
-          since: options.since,
-          ...(options.last && { last: parseInt(options.last) }),
-          // PR sequence options
-          prSequence: options.prSequence || false,
-          baseBranch: options.baseBranch,
-          headBranch: options.headBranch,
-          // GitHub App PR testing
-          ...(options.pr && { pr: parseInt(options.pr) })
-        }, options.tunnelUuid, parseInt(options.tunnelPort) || 3000);
-      } else {
-        // Standard mode with tunnel key for backend tunnel creation
-        testManager = new TestManager({
-          apiKey,
-          repoPath,
-          baseUrl: options.baseUrl,
-          ...(options.outputDir && { testOutputDir: options.outputDir }),
-          serverTimeout: parseInt(options.serverTimeout) || 60000,
-          maxTestWaitTime: parseInt(options.maxTestTime) || 600000,
-          downloadArtifacts: options.downloadArtifacts || false,
-          tunnelKey, // Pass the generated tunnel key
-          createTunnel: true, // Enable tunnel creation
-          tunnelPort: parseInt(options.serverPort) || 3000, // Use server port for tunnel
-          // Commit analysis options
-          commit: options.commit,
-          commitRange: options.commitRange,
-          since: options.since,
-          ...(options.last && { last: parseInt(options.last) }),
-          // PR sequence options
-          prSequence: options.prSequence || false,
-          baseBranch: options.baseBranch,
-          headBranch: options.headBranch,
-          // GitHub App PR testing
-          ...(options.pr && { pr: parseInt(options.pr) })
-        });
+      // Log port usage
+      systemLogger.info(`Server port: ${serverPort}`);
+      if (options.waitForServer) {
+        systemLogger.info(`Will wait for server on port ${serverPort} before creating tunnel`);
       }
+      systemLogger.info(`Tunnel will forward port ${serverPort} to ngrok`);
+
+      // Initialize E2E manager (after all validations pass)
+      const e2eManager = new E2EManager({
+        apiKey,
+        repoPath,
+        baseUrl: options.baseUrl,
+        ...(options.outputDir && { testOutputDir: options.outputDir }),
+        serverTimeout: parseInt(options.serverTimeout) || 60000,
+        maxTestWaitTime: parseInt(options.maxTestTime) || 600000,
+        downloadArtifacts: options.downloadArtifacts || false,
+        // Server port is used for tunnel
+        serverPort: serverPort,
+        // Commit analysis options
+        commit: options.commit,
+        commitRange: options.commitRange,
+        since: options.since,
+        ...(options.last && { last: parseInt(options.last) }),
+        // PR sequence options
+        prSequence: options.prSequence || false,
+        baseBranch: options.baseBranch,
+        headBranch: options.headBranch,
+        // GitHub App PR testing
+        ...(options.pr && { pr: parseInt(options.pr) })
+      });
 
       // Wait for server if requested
       if (options.waitForServer) {
-        const serverPort = parseInt(options.serverPort);
         const serverTimeout = parseInt(options.serverTimeout) || 60000;
         
         systemLogger.debug('Waiting for development server', { 
@@ -183,7 +153,7 @@ program
           (systemLogger.progress as any).start(`Waiting for development server on port ${serverPort}`);
         }
         
-        const serverReady = await testManager.waitForServer(serverPort, serverTimeout);
+        const serverReady = await e2eManager.waitForServer(serverPort, serverTimeout);
         if (!serverReady) {
           systemLogger.error(`Server on port ${serverPort} did not start within ${serverTimeout}ms`);
           process.exit(1);
@@ -196,7 +166,7 @@ program
       } else {
         (systemLogger.progress as any).start('Starting test analysis and generation');
       }
-      const result = await testManager.runCommitTests();
+      const result = await e2eManager.runCommitTests();
 
       if (result.success) {
         systemLogger.success('Tests completed successfully!');
@@ -205,17 +175,14 @@ program
           systemLogger.displayFileList(result.testFiles, repoPath);
         }
 
-        systemLogger.debug('Test suite completed', { 
-          category: 'test',
-          details: { suiteUuid: result.suiteUuid } 
-        } as any);
         systemLogger.info(`Test suite ID: ${result.suiteUuid}`);
-        
+
         // Check if any tests failed (process.exitCode may have been set by reportResults)
         if (process.exitCode === 1) {
-          systemLogger.error('Some tests failed - see results above');
+          systemLogger.error('Some tests failed - see results above.');
           process.exit(1);
         } else {
+          systemLogger.success('All tests completed successfully!');
           process.exit(0);
         }
       } else {
@@ -278,14 +245,14 @@ program
       }
 
       // Create a basic test manager just for API access
-      const testManager = new TestManager({
+      const e2eManager = new E2EManager({
         apiKey,
         repoPath: process.cwd(), // Not used for status check
         baseUrl: options.baseUrl
       });
 
       // Get test suite status
-      const suite = await (testManager as any).client.getCommitTestSuiteStatus(options.suiteId);
+      const suite = await (e2eManager as any).client.getCommitTestSuiteStatus(options.suiteId);
       
       if (!suite) {
         systemLogger.error(`Test suite not found: ${options.suiteId}`);
@@ -362,14 +329,14 @@ program
       }
 
       // Create a basic test manager just for API access
-      const testManager = new TestManager({
+      const e2eManager = new E2EManager({
         apiKey,
         repoPath: process.cwd(), // Not used for listing
         baseUrl: options.baseUrl
       });
 
       // List test suites
-      const result = await (testManager as any).client.listTestSuites({
+      const result = await (e2eManager as any).client.listTestSuites({
         repoName: options.repo,
         branchName: options.branch,
         limit: parseInt(options.limit),
@@ -409,6 +376,9 @@ program
     }
   });
 
+// Workflow command - temporarily disabled during refactoring
+// TODO: Re-implement workflow command with new architecture
+/*
 program
   .command('workflow')
   .description('Run complete E2E testing workflow with server management and tunnel setup')
@@ -598,10 +568,11 @@ program
       if (process.env.DEBUG) {
         systemLogger.error('Stack trace: ' + (error as any)?.stack);
       }
-      
+
       process.exit(1);
     }
   });
+*/
 
 /**
  * Get colored status text

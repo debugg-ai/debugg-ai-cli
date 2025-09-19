@@ -1,17 +1,17 @@
 import * as indexModule from '../index';
-import { TestManager } from '../lib/test-manager';
+import { E2EManager } from '../lib/e2e-manager';
 
 // Mock dependencies
-jest.mock('../lib/test-manager');
+jest.mock('../lib/e2e-manager');
 
-const MockedTestManager = TestManager as jest.MockedClass<typeof TestManager>;
+const MockedE2EManager = E2EManager as jest.MockedClass<typeof E2EManager>;
 
 describe('Index Module', () => {
   describe('exports', () => {
     it('should export all main classes', () => {
       expect(indexModule.CLIBackendClient).toBeDefined();
       expect(indexModule.GitAnalyzer).toBeDefined();
-      expect(indexModule.TestManager).toBeDefined();
+      expect(indexModule.E2EManager).toBeDefined();
     });
 
     it('should export CLI backend client', () => {
@@ -24,8 +24,8 @@ describe('Index Module', () => {
       expect(typeof indexModule.GitAnalyzer).toBe('function');
     });
 
-    it('should export test manager types', () => {
-      expect(typeof indexModule.TestManager).toBe('function');
+    it('should export E2E manager types', () => {
+      expect(typeof indexModule.E2EManager).toBe('function');
     });
 
     it('should export DEFAULT_CONFIG constants', () => {
@@ -71,17 +71,17 @@ describe('Index Module', () => {
   });
 
   describe('runDebuggAITests function', () => {
-    let mockTestManager: jest.Mocked<TestManager>;
+    let mockE2EManager: jest.Mocked<E2EManager>;
 
     beforeEach(() => {
       jest.clearAllMocks();
       
-      mockTestManager = {
+      mockE2EManager = {
         waitForServer: jest.fn(),
         runCommitTests: jest.fn()
       } as any;
       
-      MockedTestManager.mockImplementation(() => mockTestManager);
+      MockedE2EManager.mockImplementation(() => mockE2EManager);
     });
 
     it('should run tests successfully with minimal options', async () => {
@@ -89,7 +89,7 @@ describe('Index Module', () => {
         apiKey: 'test-api-key'
       };
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-123',
         testFiles: ['/path/to/test.spec.js']
@@ -97,13 +97,13 @@ describe('Index Module', () => {
 
       const result = await indexModule.runDebuggAITests(options);
 
-      expect(MockedTestManager).toHaveBeenCalledWith({
+      expect(MockedE2EManager).toHaveBeenCalledWith(expect.objectContaining({
         apiKey: 'test-api-key',
         repoPath: process.cwd(),
         baseUrl: 'https://api.debugg.ai',
         testOutputDir: 'tests/debugg-ai',
         maxTestWaitTime: 600000
-      });
+      }));
 
       expect(result).toEqual({
         success: true,
@@ -121,20 +121,20 @@ describe('Index Module', () => {
         maxTestWaitTime: 900000
       };
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-456'
       });
 
       const result = await indexModule.runDebuggAITests(options);
 
-      expect(MockedTestManager).toHaveBeenCalledWith({
+      expect(MockedE2EManager).toHaveBeenCalledWith(expect.objectContaining({
         apiKey: 'test-api-key',
         repoPath: '/custom/repo',
         baseUrl: 'https://custom.api.com',
         testOutputDir: 'custom/tests',
         maxTestWaitTime: 900000
-      });
+      }));
 
       expect(result.success).toBe(true);
       expect(result.suiteUuid).toBe('suite-456');
@@ -147,16 +147,16 @@ describe('Index Module', () => {
         serverPort: 4000
       };
 
-      mockTestManager.waitForServer.mockResolvedValue(true);
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.waitForServer.mockResolvedValue(true);
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-789'
       });
 
       const result = await indexModule.runDebuggAITests(options);
 
-      expect(mockTestManager.waitForServer).toHaveBeenCalledWith(4000, 60000);
-      expect(mockTestManager.runCommitTests).toHaveBeenCalled();
+      expect(mockE2EManager.waitForServer).toHaveBeenCalledWith(4000, 60000);
+      expect(mockE2EManager.runCommitTests).toHaveBeenCalled();
       expect(result.success).toBe(true);
     });
 
@@ -166,15 +166,15 @@ describe('Index Module', () => {
         waitForServer: true
       };
 
-      mockTestManager.waitForServer.mockResolvedValue(true);
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.waitForServer.mockResolvedValue(true);
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-default'
       });
 
       await indexModule.runDebuggAITests(options);
 
-      expect(mockTestManager.waitForServer).toHaveBeenCalledWith(3000, 60000);
+      expect(mockE2EManager.waitForServer).toHaveBeenCalledWith(3000, 60000);
     });
 
     it('should fail when server does not start', async () => {
@@ -184,7 +184,7 @@ describe('Index Module', () => {
         serverPort: 5000
       };
 
-      mockTestManager.waitForServer.mockResolvedValue(false);
+      mockE2EManager.waitForServer.mockResolvedValue(false);
 
       const result = await indexModule.runDebuggAITests(options);
 
@@ -193,7 +193,7 @@ describe('Index Module', () => {
         error: 'Server on port 5000 did not start in time'
       });
 
-      expect(mockTestManager.runCommitTests).not.toHaveBeenCalled();
+      expect(mockE2EManager.runCommitTests).not.toHaveBeenCalled();
     });
 
     it('should handle test execution failure', async () => {
@@ -201,7 +201,7 @@ describe('Index Module', () => {
         apiKey: 'test-api-key'
       };
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: false,
         error: 'Test execution failed'
       });
@@ -219,7 +219,7 @@ describe('Index Module', () => {
         apiKey: 'test-api-key'
       };
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-partial',
         testFiles: []
@@ -239,7 +239,7 @@ describe('Index Module', () => {
         apiKey: 'test-api-key'
       };
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true
         // Missing suiteUuid and testFiles
       });
@@ -256,7 +256,7 @@ describe('Index Module', () => {
         apiKey: 'test-api-key'
       };
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-complete',
         testFiles: ['/test1.spec.js', '/test2.spec.js']
@@ -276,7 +276,7 @@ describe('Index Module', () => {
         apiKey: 'test-api-key'
       };
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: false,
         error: 'Something went wrong',
         suiteUuid: 'partial-suite'
@@ -297,12 +297,12 @@ describe('Index Module', () => {
         apiKey: 'test-api-key'
       };
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true
       });
 
-      // Mock the dynamic import by ensuring TestManager is available
-      expect(MockedTestManager).toBeDefined();
+      // Mock the dynamic import by ensuring E2EManager is available
+      expect(MockedE2EManager).toBeDefined();
       
       const result = await indexModule.runDebuggAITests(options);
       
@@ -315,14 +315,14 @@ describe('Index Module', () => {
         waitForServer: true
       };
 
-      mockTestManager.waitForServer.mockResolvedValue(true);
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.waitForServer.mockResolvedValue(true);
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true
       });
 
       await indexModule.runDebuggAITests(options);
 
-      expect(mockTestManager.waitForServer).toHaveBeenCalledWith(
+      expect(mockE2EManager.waitForServer).toHaveBeenCalledWith(
         indexModule.DEFAULT_CONFIG.DEFAULT_SERVER_PORT,
         indexModule.DEFAULT_CONFIG.DEFAULT_SERVER_WAIT_TIME
       );
@@ -333,7 +333,7 @@ describe('Index Module', () => {
         apiKey: 'test-api-key'
       };
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'concurrent-suite'
       });
@@ -353,7 +353,7 @@ describe('Index Module', () => {
         expect(result.suiteUuid).toBe('concurrent-suite');
       });
 
-      expect(MockedTestManager).toHaveBeenCalledTimes(3);
+      expect(MockedE2EManager).toHaveBeenCalledTimes(3);
     });
   });
 
@@ -364,14 +364,12 @@ describe('Index Module', () => {
       const expectedExports = [
         'CLIBackendClient',
         'GitAnalyzer',
-        'TestManager',
-        'TunnelManager',
+        'E2EManager',
+        'TunnelService',
         'ServerManager',
-        'WorkflowOrchestrator',
         'DEFAULT_CONFIG',
         'ENV_VARS',
-        'runDebuggAITests',
-        'runWorkflow'
+        'runDebuggAITests'
       ];
 
       expectedExports.forEach(exportName => {

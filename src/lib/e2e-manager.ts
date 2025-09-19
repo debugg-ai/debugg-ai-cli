@@ -1,22 +1,22 @@
+import { randomUUID } from 'crypto';
 import { CLIBackendClient } from '../backend/cli/client';
 import { GitAnalyzer, WorkingChanges } from './git-analyzer';
-import { TunnelManager, TunnelInfo } from './tunnel-manager';
+import { TunnelService, TunnelInfo } from './tunnel-service';
 import * as fs from 'fs-extra';
 import * as path from 'path';
-import chalk from 'chalk';
 import { systemLogger } from '../util/system-logger';
 import { telemetry } from '../services/telemetry';
 
-export interface TestManagerOptions {
+export interface E2EManagerOptions {
   apiKey: string;
   repoPath: string;
   baseUrl?: string;
   testOutputDir?: string;
   waitForServer?: boolean;
+  serverPort?: number; // Server port to test and tunnel
   serverTimeout?: number;
   maxTestWaitTime?: number;
-  tunnelUrl?: string;
-  tunnelMetadata?: Record<string, any> | undefined;
+  ngrokAuthToken?: string; // Ngrok auth token (will use NGROK_AUTH_TOKEN env if not provided)
   downloadArtifacts?: boolean; // Whether to download test artifacts (scripts, recordings, etc.) - defaults to false
   // Commit analysis options
   commit?: string; // Specific commit hash
@@ -28,20 +28,14 @@ export interface TestManagerOptions {
   prSequence?: boolean; // Enable PR commit sequence testing (sends individual test requests per commit)
   baseBranch?: string | undefined; // Base branch for PR testing (auto-detected from GitHub env if not provided)
   headBranch?: string | undefined; // Head branch for PR testing (auto-detected from GitHub env if not provided)
-  // Tunnel configuration
-  tunnelKey?: string; // UUID for custom endpoints (e.g., <uuid>.debugg.ai) - passed as 'key' to backend
-  createTunnel?: boolean; // Whether to create an ngrok tunnel after getting tunnelKey from backend
-  tunnelPort?: number; // Port to tunnel (defaults to 3000)
 }
 
-export interface TestResult {
+export interface E2EResult {
   success: boolean;
   suiteUuid?: string | undefined;
   suite?: any; // Using any for now since we're working with backend types
   error?: string;
   testFiles?: string[];
-  tunnelKey?: string; // TunnelKey returned from backend for ngrok setup
-  tunnelInfo?: TunnelInfo; // Tunnel information if tunnel was created
   // PR sequence testing results
   prSequenceResults?: PRSequenceResult[];
   totalCommitsTested?: number;
@@ -58,16 +52,18 @@ export interface PRSequenceResult {
 }
 
 /**
- * Manages the complete test lifecycle from commit analysis to result reporting
+ * Manages the complete E2E test execution lifecycle from commit analysis to result reporting
+ * ALWAYS handles tunnel creation internally - this is our core responsibility
  */
-export class TestManager {
+export class E2EManager {
   private client: CLIBackendClient;
   private gitAnalyzer: GitAnalyzer;
-  private tunnelManager?: TunnelManager;
-  private tunnelInfo?: TunnelInfo;
-  private options: TestManagerOptions;
+  private tunnelService: TunnelService | null = null;
+  private activeTunnel: TunnelInfo | null = null;
+  private urlUuidSubdomain: string | null = null;  // Stores the UUID for the tunnel subdomain
+  private options: E2EManagerOptions;
 
-  constructor(options: TestManagerOptions) {
+  constructor(options: E2EManagerOptions) {
     this.options = {
       testOutputDir: 'tests/debugg-ai',
       serverTimeout: 30000, // 30 seconds
@@ -86,51 +82,78 @@ export class TestManager {
     this.gitAnalyzer = new GitAnalyzer({
       repoPath: options.repoPath
     });
+  }
 
-    // Initialize tunnel manager if tunnel creation is requested
-    if (this.options.createTunnel) {
-      this.tunnelManager = new TunnelManager({
-        baseDomain: 'ngrok.debugg.ai'
-      });
+  /**
+   * Create tunnel internally for test suite
+   * This is our core responsibility - we ALWAYS handle tunnels internally!
+   */
+  private async createInternalTunnel(suiteUuid: string, tunnelKey: string | null): Promise<void> {
+    if (!this.options.serverPort) {
+      throw new Error('Server port is required for test execution. Tests cannot run without a tunnel!');
+    }
+
+    systemLogger.info(`Creating ngrok tunnel on port ${this.options.serverPort}`, { category: 'tunnel' });
+
+    // Check if we have a tunnel key from the backend
+    if (!tunnelKey) {
+      systemLogger.error('No tunnel key provided by backend', { category: 'tunnel' });
+      systemLogger.error('The backend did not return a tunnel authentication token', { category: 'tunnel' });
+      systemLogger.error('This might indicate:', { category: 'tunnel' });
+      systemLogger.error('  1. The backend API version is outdated', { category: 'tunnel' });
+      systemLogger.error('  2. Your account does not have tunnel permissions', { category: 'tunnel' });
+      systemLogger.error('  3. The test suite was created without tunnel support', { category: 'tunnel' });
+      throw new Error('No tunnel key provided by backend. Cannot create tunnel without authentication token.');
+    }
+
+    // Use the UUID subdomain that we sent to the backend
+    // This ensures the tunnel URL matches what the backend expects
+    const subdomain = this.urlUuidSubdomain || `${suiteUuid.substring(0, 8)}`;
+
+    systemLogger.info(`Creating tunnel with subdomain: ${subdomain}`, { category: 'tunnel' });
+    systemLogger.info(`Tunnel will forward to local port: ${this.options.serverPort}`, { category: 'tunnel' });
+
+    // Create tunnel using our TunnelService with the backend-provided token
+    this.tunnelService = new TunnelService({ verbose: false });
+    this.activeTunnel = await this.tunnelService.createTunnel(
+      this.options.serverPort,
+      subdomain,
+      tunnelKey
+    );
+
+    systemLogger.info(`Tunnel successfully created: ${this.activeTunnel.url}`, { category: 'tunnel' });
+    systemLogger.info(`Expected URL format: https://${subdomain}.ngrok.debugg.ai`, { category: 'tunnel' });
+
+    // Update test suite with tunnel URL
+    await this.client.updateCommitTestSuite(suiteUuid, {
+      publicUrl: this.activeTunnel.url,
+      testEnvironment: {
+        url: this.activeTunnel.url,
+        type: 'ngrok_tunnel' as const
+      }
+    });
+  }
+
+  /**
+   * Cleanup resources (tunnel, etc.)
+   */
+  async cleanup(): Promise<void> {
+    if (this.tunnelService) {
+      try {
+        await this.tunnelService.cleanup();
+        systemLogger.debug('Tunnel cleaned up', { category: 'tunnel' });
+      } catch (error) {
+        systemLogger.warn(`Failed to cleanup tunnel: ${error}`, { category: 'tunnel' });
+      }
+      this.tunnelService = null;
+      this.activeTunnel = null;
     }
   }
 
   /**
-   * Create TestManager with tunnel URL support
+   * Run E2E tests for the current commit or working changes
    */
-  static withTunnel(
-    options: Omit<TestManagerOptions, 'tunnelUrl' | 'tunnelMetadata'>,
-    tunnelUrl: string,
-    tunnelMetadata?: Record<string, any>
-  ): TestManager {
-    return new TestManager({
-      ...options,
-      tunnelUrl,
-      tunnelMetadata
-    });
-  }
-
-  /**
-   * Create TestManager that will create an ngrok tunnel after backend provides tunnelKey
-   * This is the correct flow: Backend creates commit suite -> provides tunnelKey -> create tunnel
-   */
-  static withAutoTunnel(
-    options: TestManagerOptions,
-    endpointUuid: string,
-    tunnelPort: number = 3000
-  ): TestManager {
-    return new TestManager({
-      ...options,
-      tunnelKey: endpointUuid,
-      createTunnel: true,
-      tunnelPort
-    });
-  }
-
-  /**
-   * Run tests for the current commit or working changes
-   */
-  async runCommitTests(): Promise<TestResult> {
+  async runCommitTests(): Promise<E2EResult> {
     const testStartTime = Date.now();
     systemLogger.info('Starting test analysis and generation', { category: 'test' });
 
@@ -166,14 +189,7 @@ export class TestManager {
         return await this.runPRCommitSequenceTests();
       }
 
-      // Step 4: Validate tunnel URL if provided (simplified for now)
-      if (this.options.tunnelUrl) {
-        systemLogger.info('Using tunnel URL', { category: 'tunnel' });
-        // Note: Tunnel validation can be added later if needed
-        systemLogger.info(`Using tunnel URL: ${this.options.tunnelUrl}`);
-      }
-
-      // Step 5: Analyze git changes
+      // Step 4: Analyze git changes
       systemLogger.info('Analyzing git changes', { category: 'git' });
       const changes = await this.analyzeChanges();
       
@@ -200,15 +216,20 @@ export class TestManager {
         hasLast: !!this.options.last
       });
 
-      // Step 7: Submit test request
+      // Step 5: Create commit test suite first to get the suite UUID
       systemLogger.info('Creating test suite', { category: 'test' });
-      
+
       // Create test description for the changes
       const testDescription = await this.createTestDescription(changes);
-      
+
       // Get PR number if available
       const prNumber = this.gitAnalyzer.getPRNumber();
-      
+
+      // Generate UUID for the tunnel subdomain
+      // This will be used to create the URL: <uuid>.ngrok.debugg.ai
+      const urlUuidSubdomain = randomUUID();
+      systemLogger.info(`Generated URL UUID subdomain: ${urlUuidSubdomain}`, { category: 'tunnel' });
+
       const testRequest: any = {
         repoName: this.gitAnalyzer.getRepoName(),
         repoPath: this.options.repoPath,
@@ -216,27 +237,9 @@ export class TestManager {
         commitHash: changes.branchInfo.commitHash,
         workingChanges: changes.changes,
         testDescription,
+        key: urlUuidSubdomain,  // This tells backend which subdomain to use
         ...(prNumber && { prNumber })
       };
-
-      // Add tunnel key (UUID) for custom endpoints (e.g., <uuid>.debugg.ai)
-      // This tells the backend which subdomain to expect the tunnel on
-      if (this.options.tunnelKey) {
-        testRequest.key = this.options.tunnelKey;
-        systemLogger.debug('Sending tunnel key to backend', { 
-          category: 'tunnel',
-          details: { key: this.options.tunnelKey.substring(0, 8) + '...' } 
-        });
-      }
-
-      // if (this.options.tunnelUrl) {
-      //   testRequest.publicUrl = this.options.tunnelUrl;
-      //   testRequest.testEnvironment = {
-      //     url: this.options.tunnelUrl,
-      //     type: 'ngrok_tunnel' as const,
-      //     metadata: this.options.tunnelMetadata
-      //   };
-      // }
 
       const response = await this.client.createCommitTestSuite(testRequest);
       
@@ -245,80 +248,21 @@ export class TestManager {
       }
 
       systemLogger.info(`Test suite created: ${response.testSuiteUuid}`, { category: 'test' });
-
-      // Step 7.5: Create tunnel if requested and backend provided tunnelKey
-      let tunnelInfo: TunnelInfo | undefined;
-      systemLogger.debug('Tunnel setup', {
-        category: 'tunnel',
-        details: {
-          createTunnel: this.options.createTunnel,
-          tunnelKey: this.options.tunnelKey,
-          tunnelKeyLength: this.options.tunnelKey?.length,
-          backendTunnelKey: response.tunnelKey ? 'PROVIDED' : 'NOT_PROVIDED',
-          backendTunnelKeyLength: response.tunnelKey?.length
-        }
-      });
-      if (response.tunnelKey && this.options.tunnelKey) {
-        systemLogger.info('Setting up ngrok tunnel', { category: 'tunnel' });
-        systemLogger.info('TUNNEL SETUP');
-        systemLogger.info(`Endpoint UUID: ${this.options.tunnelKey}`);
-        systemLogger.info(`Expected URL: https://${this.options.tunnelKey}.ngrok.debugg.ai`);
-        systemLogger.info(`Local port: ${this.options.tunnelPort || 3000}`);
-        systemLogger.info(`Backend provided tunnelKey: ${response.tunnelKey ? '✓ YES' : '✗ NO'}`);
-
-        if (response.tunnelKey) {
-          systemLogger.debug('Tunnel key details', {
-            category: 'tunnel',
-            details: {
-              keyLength: response.tunnelKey.length,
-              keyPrefix: response.tunnelKey.substring(0, 8) + '...'
-            }
-          });
-        }
-
-        if (!this.tunnelManager) {
-          throw new Error('Tunnel manager not initialized. This should not happen.');
-        }
-
-        const tunnelPort = this.options.tunnelPort || 3000;
-        
-        try {
-          systemLogger.info('Starting ngrok tunnel');
-          tunnelInfo = await this.tunnelManager.createTunnelWithBackendKey(
-            tunnelPort,
-            this.options.tunnelKey, // UUID for endpoint
-            response.tunnelKey       // ngrok auth token from backend
-          );
-          
-          // Store tunnel info for later use
-          this.tunnelInfo = tunnelInfo;
-          
-          systemLogger.tunnel.connected(tunnelInfo.url);
-          systemLogger.success(`TUNNEL ACTIVE: ${tunnelInfo.url} -> localhost:${tunnelPort}`);
-          
-          // Track successful tunnel creation
-          telemetry.trackTunnelCreation(true, tunnelPort);
-        } catch (error) {
-          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
-          systemLogger.error(`TUNNEL FAILED: ${errorMsg}`);
-          systemLogger.warn('Tests will proceed without tunnel - ensure your server is accessible at the expected URL');
-          systemLogger.warn(`Expected backend URL: https://${this.options.tunnelKey}.ngrok.debugg.ai`);
-          
-          // Track tunnel creation failure
-          telemetry.trackTunnelCreation(false, tunnelPort, errorMsg);
-        }
-      } else {
-        // Log why tunnel wasn't created
-        if (this.options.createTunnel) {
-          systemLogger.info('TUNNEL SETUP SKIPPED');
-          systemLogger.debug(`createTunnel: ${this.options.createTunnel ? '✓' : '✗'}`);
-          systemLogger.debug(`tunnelKey provided: ${this.options.tunnelKey ? '✓' : '✗'}`);
-          systemLogger.debug(`backend tunnelKey: ${response.tunnelKey ? '✓' : '✗'}`);
-
-        }
+      if (response.tunnelKey) {
+        systemLogger.info(`Tunnel key received from backend`, { category: 'tunnel' });
       }
 
-      // Step 8: Wait for tests to complete
+      // Step 6: Create tunnel internally (this is our core responsibility!)
+      if (this.options.serverPort) {
+        // Store the URL UUID subdomain for tunnel creation
+        this.urlUuidSubdomain = urlUuidSubdomain;
+        await this.createInternalTunnel(response.testSuiteUuid, response.tunnelKey || null);
+      } else {
+        systemLogger.warn('No server port specified - tests will run without tunnel', { category: 'tunnel' });
+        systemLogger.warn('This may cause tests to fail if they require external access', { category: 'tunnel' });
+      }
+
+      // Step 7: Wait for tests to complete
       systemLogger.info('Waiting for tests to complete', { category: 'test' });
       const completedSuite = await this.client.waitForCommitTestSuiteCompletion(
         response.testSuiteUuid,
@@ -353,10 +297,7 @@ export class TestManager {
       this.reportResults(completedSuite);
 
       if (this.options.downloadArtifacts) {
-        systemLogger.success(`Tests completed successfully! Generated ${testFiles.length} test files`);
         telemetry.trackArtifactDownload('test_files', true, testFiles.length);
-      } else {
-        systemLogger.success('Tests completed successfully! (artifacts not downloaded - use --download-artifacts to save test files)');
       }
       
       // Track test completion
@@ -373,30 +314,21 @@ export class TestManager {
         executionType: testExecutionType
       });
 
-      const result: TestResult = {
+      const result: E2EResult = {
         success: true,
         suiteUuid: response.testSuiteUuid,
         suite: completedSuite,
         testFiles
       };
 
-      // Add optional fields only if they have values
-      if (response.tunnelKey) {
-        result.tunnelKey = response.tunnelKey;
-      }
-
-      if (tunnelInfo) {
-        result.tunnelInfo = tunnelInfo;
-      }
-
       return result;
 
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       systemLogger.error(`Test run failed: ${errorMsg}`);
-      
+
       // Track test failure
-      const failureExecutionType = this.options.pr ? 'pr' : 
+      const failureExecutionType = this.options.pr ? 'pr' :
                           this.options.prSequence ? 'pr-sequence' :
                           this.options.commit ? 'commit' : 'working';
       telemetry.trackTestComplete({
@@ -408,22 +340,17 @@ export class TestManager {
         error: errorMsg,
         executionType: failureExecutionType
       });
-      
+
+      // Cleanup tunnel on error
+      await this.cleanup();
+
       return {
         success: false,
         error: errorMsg
       };
     } finally {
-      // Cleanup tunnel if it was created
-      if (this.tunnelManager) {
-        try {
-          await this.tunnelManager.disconnectAll();
-          systemLogger.info('✓ Tunnels cleaned up');
-        } catch (error) {
-          systemLogger.warn('⚠ Failed to cleanup tunnels: ' + error);
-        }
-      }
-      
+      // Always cleanup tunnel when done
+      await this.cleanup();
     }
   }
 
@@ -431,7 +358,7 @@ export class TestManager {
    * Run GitHub App-based PR test - sends single request with PR number
    * Backend handles all git analysis via GitHub App integration
    */
-  async runGitHubAppPRTest(): Promise<TestResult> {
+  async runGitHubAppPRTest(): Promise<E2EResult> {
     try {
       // Get current branch name
       const branchInfo = await this.gitAnalyzer.getCurrentBranchInfo();
@@ -439,6 +366,10 @@ export class TestManager {
       systemLogger.info(`Submitting PR #${this.options.pr} for GitHub App-based testing`, { category: 'test' });
       systemLogger.info(`Branch: ${branchInfo.branch}`, { category: 'git' });
       
+      // Generate UUID for the tunnel subdomain
+      const urlUuidSubdomain = randomUUID();
+      systemLogger.info(`Generated URL UUID subdomain: ${urlUuidSubdomain}`, { category: 'tunnel' });
+
       // Create test request for GitHub App PR testing
       const testRequest: any = {
         type: 'pull_request',
@@ -447,21 +378,9 @@ export class TestManager {
         branch: branchInfo.branch,
         pr_number: this.options.pr,
         commitHash: branchInfo.commitHash,
-        testDescription: `Automated E2E tests for PR #${this.options.pr}`
+        testDescription: `Automated E2E tests for PR #${this.options.pr}`,
+        key: urlUuidSubdomain  // This tells backend which subdomain to use
       };
-
-      // Add tunnel configuration if applicable
-      if (this.options.tunnelUrl) {
-        testRequest.tunnelUrl = this.options.tunnelUrl;
-      }
-
-      if (this.options.tunnelMetadata) {
-        testRequest.tunnelMetadata = this.options.tunnelMetadata;
-      }
-
-      if (this.options.tunnelKey) {
-        testRequest.tunnelKey = this.options.tunnelKey;
-      }
 
       // Submit test request
       systemLogger.info('Submitting PR test request to backend', { category: 'api' });
@@ -473,6 +392,13 @@ export class TestManager {
 
       const suiteUuid = createResult.testSuiteUuid;
       systemLogger.info(`Test suite created: ${suiteUuid}`, { category: 'test' });
+
+      // Create tunnel internally if port specified
+      if (this.options.serverPort) {
+        // Store the URL UUID subdomain for tunnel creation
+        this.urlUuidSubdomain = urlUuidSubdomain;
+        await this.createInternalTunnel(suiteUuid, createResult.tunnelKey || null);
+      }
 
       // Wait for test completion
       systemLogger.info('Waiting for test execution', { category: 'test' });
@@ -494,21 +420,12 @@ export class TestManager {
 
       systemLogger.success(`GitHub App PR test completed for PR #${this.options.pr}`);
       
-      const result: TestResult = {
+      const result: E2EResult = {
         success: true,
         suiteUuid,
         suite,
         testFiles: downloadedFiles
       };
-      
-      // Add optional fields only if they have values
-      if (this.options.tunnelKey) {
-        result.tunnelKey = this.options.tunnelKey;
-      }
-      
-      if (this.tunnelInfo) {
-        result.tunnelInfo = this.tunnelInfo;
-      }
       
       return result;
       
@@ -525,7 +442,7 @@ export class TestManager {
   /**
    * Run PR commit sequence tests - sends individual test requests for each commit
    */
-  async runPRCommitSequenceTests(): Promise<TestResult> {
+  async runPRCommitSequenceTests(): Promise<E2EResult> {
     try {
       // Step 1: Analyze PR commit sequence
       const prSequence = await this.gitAnalyzer.analyzePRCommitSequence(
@@ -695,16 +612,13 @@ export class TestManager {
       }
     };
 
-    // Add tunnel configuration if available
-    if (this.options.tunnelKey) {
-      testRequest.tunnelKey = this.options.tunnelKey;
-    }
-    if (this.options.createTunnel) {
-      testRequest.createTunnel = true;
-      testRequest.tunnelPort = this.options.tunnelPort || 3000;
-    }
+    // Create test suite first
+    const result = await this.client.createCommitTestSuite(testRequest);
 
-    return await this.client.createCommitTestSuite(testRequest);
+    // Note: For PR sequence tests, we don't create tunnels per commit
+    // The main test run should have already set up the tunnel
+
+    return result;
   }
 
 
@@ -999,10 +913,8 @@ Test Requirements:
       if (test.curRun.runScript) {
         try {
           const scriptPath = path.join(testDir, `${testName}.spec.js`);
-          // For scripts, we need to replace tunnel URLs with localhost - use originalBaseUrl like recordingHandler
-          // Fallback to port 3000 if tunnelPort is not set
-          const port = this.options.tunnelPort || 3000;
-          const originalBaseUrl = `http://localhost:${port}`;
+          // For scripts, we need to replace tunnel URLs with localhost
+          const originalBaseUrl = `http://localhost:3000`;
           
           systemLogger.debug(`Downloading script for ${testName}`, { 
             category: 'artifact',
@@ -1103,24 +1015,6 @@ Test Requirements:
       if (failed > 0) {
         process.exitCode = 1; // Set non-zero exit code for CI/CD
       }
-    }
-  }
-
-  /**
-   * Get colored status text
-   */
-  private getStatusColor(status: string): string {
-    switch (status) {
-      case 'completed':
-        return chalk.green('✓ PASSED');
-      case 'failed':
-        return chalk.red('✗ FAILED');
-      case 'running':
-        return chalk.yellow('⏳ RUNNING');
-      case 'pending':
-        return chalk.blue('⏸ PENDING');
-      default:
-        return chalk.gray('❓ UNKNOWN');
     }
   }
 }

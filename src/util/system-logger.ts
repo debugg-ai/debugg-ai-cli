@@ -678,7 +678,7 @@ class SystemLogger {
     if (!this.isDevMode) {
       this.userLogger.displayResults(suite);
     } else {
-      // In dev mode, just log the suite info
+      // In dev mode, still show the test results summary
       this.devLogger.info('Test suite completed', {
         category: 'test',
         details: {
@@ -687,6 +687,34 @@ class SystemLogger {
           testCount: suite.tests?.length
         }
       });
+
+      // Always show the test results, even in dev mode
+      if (suite.tests && suite.tests.length > 0) {
+        const passed = suite.tests.filter((t: any) => t.curRun?.outcome === 'pass').length;
+        const failed = suite.tests.filter((t: any) => t.curRun?.outcome === 'fail').length;
+        const skipped = suite.tests.filter((t: any) => t.curRun?.outcome === 'skipped').length;
+        const pending = suite.tests.filter((t: any) => t.curRun?.outcome === 'pending').length;
+        const total = suite.tests.length;
+
+        // Use console.log to bypass dev logger formatting for better visibility
+        console.log('\n=== Test Results ===');
+        console.log(`  ✓ Passed: ${passed}`);
+        console.log(`  ✗ Failed: ${failed}`);
+        if (skipped > 0) console.log(`  ⏩ Skipped: ${skipped}`);
+        if (pending > 0) console.log(`  ⏸ Pending: ${pending}`);
+        console.log(`  📊 Total: ${total}`);
+
+        // Show individual test details if there are failures
+        if (failed > 0) {
+          console.log('\nFailed Tests:');
+          suite.tests.filter((t: any) => t.curRun?.outcome === 'fail').forEach((test: any) => {
+            console.log(`  ✗ ${test.name || test.testName || 'Unnamed test'}`);
+            if (test.curRun?.error) {
+              console.log(`    ${test.curRun.error}`);
+            }
+          });
+        }
+      }
     }
   }
 

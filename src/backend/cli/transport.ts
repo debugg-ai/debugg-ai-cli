@@ -120,12 +120,60 @@ export class CLITransport {
                 return res;
             },
             async (err) => {
-                log.error(`API Error: ${err.response?.status} ${err.config?.url}`, {
-                    status: err.response?.status,
-                    detail: err.response?.data?.detail
-                });
-                
-                // Handle authentication failures
+                // Show full error response for debugging
+                const errorData = err.response?.data;
+                let errorMessage = '';
+
+                // Extract meaningful error message from response
+                if (errorData) {
+                    if (typeof errorData === 'string') {
+                        // If it's HTML, try to extract the title or body text
+                        if (errorData.includes('<!DOCTYPE html>')) {
+                            const titleMatch = errorData.match(/<title>(.*?)<\/title>/i);
+                            const h1Match = errorData.match(/<h1>(.*?)<\/h1>/i);
+                            if (titleMatch) {
+                                errorMessage = `HTML Error Page: ${titleMatch[1]}`;
+                            } else if (h1Match) {
+                                errorMessage = `HTML Error: ${h1Match[1]}`;
+                            } else {
+                                errorMessage = 'HTML error page returned (likely wrong endpoint or method)';
+                            }
+                        } else {
+                            errorMessage = errorData;
+                        }
+                    } else if (errorData.detail) {
+                        errorMessage = errorData.detail;
+                    } else if (errorData.message) {
+                        errorMessage = errorData.message;
+                    } else if (errorData.error) {
+                        errorMessage = errorData.error;
+                    } else {
+                        errorMessage = JSON.stringify(errorData);
+                    }
+                }
+
+                log.error(`API Error: ${err.response?.status} ${err.config?.method?.toUpperCase()} ${err.config?.url}`);
+                log.error(`Error details: ${errorMessage || 'No error details available'}`);
+
+                // Log request data for debugging POST/PUT/PATCH failures
+                if (err.config?.data && ['POST', 'PUT', 'PATCH'].includes(err.config?.method?.toUpperCase())) {
+                    try {
+                        const requestData = typeof err.config.data === 'string'
+                            ? JSON.parse(err.config.data)
+                            : err.config.data;
+                        log.debug('Request data that failed:', truncateForLogging(requestData));
+                    } catch (e) {
+                        // Ignore JSON parse errors
+                    }
+                }
+
+                // Handle specific HTTP status codes
+                if (err.response?.status === 404) {
+                    const endpoint = err.config?.url || 'unknown';
+                    log.error(`Endpoint not found: ${endpoint}`);
+                    log.error('This likely means the API endpoint does not exist or the URL is incorrect');
+                    throw new Error(`API endpoint not found: ${endpoint}. Please check the API version and endpoint path.`);
+                }
                 if (err.response?.status === 401) {
                     log.error('Authentication failed. Please check your API key.');
                     throw new Error('Authentication failed. Please check your API key.');
@@ -139,11 +187,10 @@ export class CLITransport {
                     log.error(message);
                     throw new Error(message);
                 }
-                
-                // Transform the error
-                return Promise.reject(
-                    (err.response && err.response.data) || "Unknown Axios error",
-                );
+
+                // Transform the error with better message
+                const finalError = errorMessage || err.response?.data || "Unknown API error";
+                return Promise.reject(finalError);
             }
         );
     }
@@ -164,6 +211,10 @@ export class CLITransport {
 
     put<T = unknown>(url: string, data?: any, cfg?: AxiosRequestConfig) {
         return this.request<T>({ url, method: "PUT", data, ...cfg });
+    }
+
+    patch<T = unknown>(url: string, data?: any, cfg?: AxiosRequestConfig) {
+        return this.request<T>({ url, method: "PATCH", data, ...cfg });
     }
 
     delete<T = unknown>(url: string, cfg?: AxiosRequestConfig) {
@@ -206,8 +257,15 @@ export class CLITransport {
     async testConnection(): Promise<{ success: boolean; error?: string }> {
         try {
             // Test with a simple endpoint that should work with valid API key
-            await this.get('/api/v1/users/me/');
-            return { success: true };
+            // Try /api/v1/users/me/ first, fall back to a simple health check
+            try {
+                await this.get('/api/v1/users/me/');
+                return { success: true };
+            } catch (userError) {
+                // If users/me fails, try a simple listing endpoint to verify auth works
+                await this.get('/api/v1/e2e-tests/commit-suites/?limit=1');
+                return { success: true };
+            }
         } catch (error) {
             return {
                 success: false,

@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import * as fs from 'fs-extra';
 import chalk from 'chalk';
-import { TestManager } from '../lib/test-manager';
+import { E2EManager } from '../lib/e2e-manager';
 import { mockFsExtra, setupMockFileSystem } from './mocks/fs-extra';
 
 // Mock dependencies
@@ -18,19 +18,19 @@ jest.mock('chalk', () => ({
   bold: jest.fn((text) => text),
   level: 0
 }));
-jest.mock('../lib/test-manager');
+jest.mock('../lib/e2e-manager');
 jest.mock('../lib/git-analyzer');
 jest.mock('dotenv', () => ({
   config: jest.fn()
 }));
 
 const MockedCommand = Command as jest.MockedClass<typeof Command>;
-const MockedTestManager = TestManager as jest.MockedClass<typeof TestManager>;
+const MockedE2EManager = E2EManager as jest.MockedClass<typeof E2EManager>;
 const mockedFs = fs as jest.Mocked<typeof fs>;
 
 describe('CLI', () => {
   let mockProgram: jest.Mocked<Command>;
-  let mockTestManager: jest.Mocked<TestManager>;
+  let mockE2EManager: jest.Mocked<E2EManager>;
   let originalExit: typeof process.exit;
   let originalEnv: NodeJS.ProcessEnv;
 
@@ -83,13 +83,13 @@ describe('CLI', () => {
 
     MockedCommand.mockImplementation(() => mockProgram);
 
-    // Setup TestManager mock
-    mockTestManager = {
+    // Setup E2EManager mock
+    mockE2EManager = {
       runCommitTests: jest.fn(),
       waitForServer: jest.fn()
     } as any;
     
-    MockedTestManager.mockImplementation(() => mockTestManager);
+    MockedE2EManager.mockImplementation(() => mockE2EManager);
   });
 
   afterEach(() => {
@@ -167,7 +167,7 @@ describe('CLI', () => {
       // Ensure fs mocks return true for path existence checks
       mockedFs.pathExists.mockImplementation(() => Promise.resolve(true));
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-123',
         testFiles: ['/test/repo/tests/test1.spec.js']
@@ -175,7 +175,7 @@ describe('CLI', () => {
 
       await expect(testAction(options)).rejects.toThrow('Process exited with code 0');
 
-      expect(MockedTestManager).toHaveBeenCalledWith(
+      expect(MockedE2EManager).toHaveBeenCalledWith(
         expect.objectContaining({
           apiKey: 'test-api-key',
           repoPath: '/test/repo',
@@ -187,7 +187,7 @@ describe('CLI', () => {
         })
       );
 
-      expect(mockTestManager.runCommitTests).toHaveBeenCalled();
+      expect(mockE2EManager.runCommitTests).toHaveBeenCalled();
       expect(process.exit).toHaveBeenCalledWith(0);
     });
 
@@ -202,7 +202,7 @@ describe('CLI', () => {
       // Ensure fs mocks return true for path existence checks
       mockedFs.pathExists.mockImplementation(() => Promise.resolve(true));
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-123',
         testFiles: []
@@ -210,7 +210,7 @@ describe('CLI', () => {
 
       await expect(testAction(options)).rejects.toThrow('Process exited with code 0');
 
-      expect(MockedTestManager).toHaveBeenCalledWith(
+      expect(MockedE2EManager).toHaveBeenCalledWith(
         expect.objectContaining({
           apiKey: 'env-api-key'
         })
@@ -225,7 +225,7 @@ describe('CLI', () => {
 
       await expect(testAction(options)).rejects.toThrow('Process exited with code 1');
       expect(process.exit).toHaveBeenCalledWith(1);
-      expect(MockedTestManager).not.toHaveBeenCalled();
+      expect(MockedE2EManager).not.toHaveBeenCalled();
     });
 
     it('should fail when repository path does not exist', async () => {
@@ -241,7 +241,7 @@ describe('CLI', () => {
 
       await expect(testAction(options)).rejects.toThrow('Process exited with code 1');
       expect(process.exit).toHaveBeenCalledWith(1);
-      expect(MockedTestManager).not.toHaveBeenCalled();
+      expect(MockedE2EManager).not.toHaveBeenCalled();
     });
 
     it('should fail when not a git repository', async () => {
@@ -257,7 +257,7 @@ describe('CLI', () => {
 
       await expect(testAction(options)).rejects.toThrow('Process exited with code 1');
       expect(process.exit).toHaveBeenCalledWith(1);
-      expect(MockedTestManager).not.toHaveBeenCalled();
+      expect(MockedE2EManager).not.toHaveBeenCalled();
     });
 
     it('should use current directory when no repo path provided', async () => {
@@ -273,7 +273,7 @@ describe('CLI', () => {
       // Ensure fs mocks return true for path existence checks
       mockedFs.pathExists.mockImplementation(() => Promise.resolve(true));
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-123',
         testFiles: []
@@ -281,7 +281,7 @@ describe('CLI', () => {
 
       await expect(testAction(options)).rejects.toThrow('Process exited with code 0');
 
-      expect(MockedTestManager).toHaveBeenCalledWith(
+      expect(MockedE2EManager).toHaveBeenCalledWith(
         expect.objectContaining({
           repoPath: '/current/dir'
         })
@@ -303,8 +303,8 @@ describe('CLI', () => {
       // Ensure fs mocks return true for path existence checks
       mockedFs.pathExists.mockImplementation(() => Promise.resolve(true));
 
-      mockTestManager.waitForServer.mockResolvedValue(true);
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.waitForServer.mockResolvedValue(true);
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-123',
         testFiles: []
@@ -312,8 +312,8 @@ describe('CLI', () => {
 
       await expect(testAction(options)).rejects.toThrow('Process exited with code 0');
 
-      expect(mockTestManager.waitForServer).toHaveBeenCalledWith(4000, 30000);
-      expect(mockTestManager.runCommitTests).toHaveBeenCalled();
+      expect(mockE2EManager.waitForServer).toHaveBeenCalledWith(4000, 30000);
+      expect(mockE2EManager.runCommitTests).toHaveBeenCalled();
     });
 
     it('should fail when server does not start', async () => {
@@ -329,11 +329,11 @@ describe('CLI', () => {
       // Ensure fs mocks return true for path existence checks
       mockedFs.pathExists.mockImplementation(() => Promise.resolve(true));
 
-      mockTestManager.waitForServer.mockResolvedValue(false);
+      mockE2EManager.waitForServer.mockResolvedValue(false);
 
       await expect(testAction(options)).rejects.toThrow('Process exited with code 1');
       expect(process.exit).toHaveBeenCalledWith(1);
-      expect(mockTestManager.runCommitTests).not.toHaveBeenCalled();
+      expect(mockE2EManager.runCommitTests).not.toHaveBeenCalled();
     });
 
     it('should disable colors when noColor option is provided', async () => {
@@ -346,7 +346,7 @@ describe('CLI', () => {
       // Ensure fs mocks return true for path existence checks
       mockedFs.pathExists.mockImplementation(() => Promise.resolve(true));
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-123',
         testFiles: []
@@ -367,7 +367,7 @@ describe('CLI', () => {
       // Ensure fs mocks return true for path existence checks
       mockedFs.pathExists.mockImplementation(() => Promise.resolve(true));
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: false,
         error: 'Test execution failed'
       });
@@ -386,7 +386,7 @@ describe('CLI', () => {
       // Ensure fs mocks return true for path existence checks
       mockedFs.pathExists.mockImplementation(() => Promise.resolve(true));
 
-      mockTestManager.runCommitTests.mockRejectedValue(new Error('Unexpected error'));
+      mockE2EManager.runCommitTests.mockRejectedValue(new Error('Unexpected error'));
 
       await expect(testAction(options)).rejects.toThrow('Process exited with code 1');
       expect(process.exit).toHaveBeenCalledWith(1);
@@ -406,7 +406,7 @@ describe('CLI', () => {
 
       const error = new Error('Test error');
       error.stack = 'Error stack trace';
-      mockTestManager.runCommitTests.mockRejectedValue(error);
+      mockE2EManager.runCommitTests.mockRejectedValue(error);
 
       // Just verify that the process exits with code 1 when DEBUG is set
       await expect(testAction(options)).rejects.toThrow('Process exited with code 1');
@@ -427,7 +427,7 @@ describe('CLI', () => {
       // Ensure fs mocks return true for path existence checks
       mockedFs.pathExists.mockImplementation(() => Promise.resolve(true));
 
-      mockTestManager.runCommitTests.mockResolvedValue({
+      mockE2EManager.runCommitTests.mockResolvedValue({
         success: true,
         suiteUuid: 'suite-123',
         testFiles: []
@@ -435,7 +435,7 @@ describe('CLI', () => {
 
       await expect(testAction(options)).rejects.toThrow('Process exited with code 0');
 
-      expect(MockedTestManager).toHaveBeenCalledWith(
+      expect(MockedE2EManager).toHaveBeenCalledWith(
         expect.objectContaining({
           apiKey: 'test-api-key',
           repoPath: '/test/repo',
@@ -483,10 +483,10 @@ describe('CLI', () => {
       };
 
       // Since we can't test the internal client calls directly due to it being private,
-      // we'll just verify the TestManager was created correctly
+      // we'll just verify the E2EManager was created correctly
       await expect(statusAction(options)).rejects.toThrow('Process exited with code 1');
 
-      expect(MockedTestManager).toHaveBeenCalledWith(
+      expect(MockedE2EManager).toHaveBeenCalledWith(
         expect.objectContaining({
           apiKey: 'test-api-key',
           repoPath: expect.any(String),
@@ -514,7 +514,7 @@ describe('CLI', () => {
 
       // Test will fail during execution, but we can't easily mock the internal client
       // This is more of an integration test concern
-      expect(MockedTestManager).toBeDefined();
+      expect(MockedE2EManager).toBeDefined();
     });
 
     it('should handle API errors gracefully', async () => {
@@ -526,7 +526,7 @@ describe('CLI', () => {
 
       // Test will fail during execution, but we can't easily mock the internal client
       // This is more of an integration test concern
-      expect(MockedTestManager).toBeDefined();
+      expect(MockedE2EManager).toBeDefined();
     });
   });
 
@@ -566,10 +566,10 @@ describe('CLI', () => {
       };
 
       // Since we can't test the internal client calls directly,
-      // we'll just verify the TestManager was created correctly
+      // we'll just verify the E2EManager was created correctly
       await expect(listAction(options)).rejects.toThrow('Process exited with code 1');
 
-      expect(MockedTestManager).toHaveBeenCalledWith(
+      expect(MockedE2EManager).toHaveBeenCalledWith(
         expect.objectContaining({
           apiKey: 'test-api-key',
           repoPath: expect.any(String),
@@ -592,7 +592,7 @@ describe('CLI', () => {
       // Test that empty results don't cause errors
       await expect(listAction(options)).rejects.toThrow('Process exited with code 1');
 
-      expect(MockedTestManager).toHaveBeenCalled();
+      expect(MockedE2EManager).toHaveBeenCalled();
     });
 
     it('should use default pagination values', async () => {
@@ -603,7 +603,7 @@ describe('CLI', () => {
 
       await expect(listAction(options)).rejects.toThrow('Process exited with code 1');
 
-      expect(MockedTestManager).toHaveBeenCalledWith(
+      expect(MockedE2EManager).toHaveBeenCalledWith(
         expect.objectContaining({
           apiKey: 'test-api-key',
           repoPath: expect.any(String),

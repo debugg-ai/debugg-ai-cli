@@ -1,4 +1,4 @@
-import { TestManager, TestManagerOptions } from '../lib/test-manager';
+import { E2EManager, E2EManagerOptions } from '../lib/e2e-manager';
 import { CLIBackendClient } from '../backend/cli/client';
 import { GitAnalyzer } from '../lib/git-analyzer';
 import * as fs from 'fs-extra';
@@ -24,12 +24,12 @@ const MockedCLIBackendClient = CLIBackendClient as jest.MockedClass<typeof CLIBa
 const MockedGitAnalyzer = GitAnalyzer as jest.MockedClass<typeof GitAnalyzer>;
 const mockedFs = fs as jest.Mocked<typeof fs>;
 
-describe('TestManager', () => {
-  let testManager: TestManager;
+describe('E2EManager', () => {
+  let testManager: E2EManager;
   let mockClient: jest.Mocked<CLIBackendClient>;
   let mockGitAnalyzer: jest.Mocked<GitAnalyzer>;
   
-  const defaultOptions: TestManagerOptions = {
+  const defaultOptions: E2EManagerOptions = {
     apiKey: 'test-api-key',
     repoPath: '/test/repo',
     baseUrl: 'https://api.debugg.ai',
@@ -67,6 +67,7 @@ describe('TestManager', () => {
       getCommitChanges: jest.fn(),
       getCommitsFromRange: jest.fn(),
       getCommitsSince: jest.fn(),
+      getPRNumber: jest.fn().mockReturnValue(null),
       getLastCommits: jest.fn(),
       getCombinedCommitChanges: jest.fn(),
       getRepoName: jest.fn(),
@@ -75,7 +76,7 @@ describe('TestManager', () => {
     
     MockedGitAnalyzer.mockImplementation(() => mockGitAnalyzer);
 
-    testManager = new TestManager(defaultOptions);
+    testManager = new E2EManager(defaultOptions);
   });
 
   describe('constructor', () => {
@@ -93,14 +94,14 @@ describe('TestManager', () => {
     });
 
     it('should merge custom options with defaults', () => {
-      const customOptions: TestManagerOptions = {
+      const customOptions: E2EManagerOptions = {
         apiKey: 'custom-key',
         repoPath: '/custom/path',
         serverTimeout: 60000,
         maxTestWaitTime: 900000
       };
 
-      new TestManager(customOptions);
+      new E2EManager(customOptions);
 
       expect(MockedCLIBackendClient).toHaveBeenCalledWith({
         apiKey: 'custom-key',

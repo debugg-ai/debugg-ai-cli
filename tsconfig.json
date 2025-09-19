@@ -29,6 +29,7 @@
     "dist",
     "src/backend/**/*",
     "src/task-handlers/**/*",
-    "src/code-gen/**/*"
+    "src/code-gen/**/*",
+    "src/services/ngrok/**/*"
   ]
 }

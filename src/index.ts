@@ -7,10 +7,9 @@
 
 export { CLIBackendClient } from './backend/cli/client';
 export { GitAnalyzer } from './lib/git-analyzer';
-export { TestManager } from './lib/test-manager';
-export { TunnelManager } from './lib/tunnel-manager';
+export { E2EManager } from './lib/e2e-manager';
+export { TunnelService } from './lib/tunnel-service';
 export { ServerManager } from './lib/server-manager';
-export { WorkflowOrchestrator } from './lib/workflow-orchestrator';
 
 export type {
   CLIClientConfig
@@ -35,16 +34,14 @@ export type {
 } from './lib/git-analyzer';
 
 export type {
-  TestManagerOptions,
-  TestResult,
+  E2EManagerOptions,
+  E2EResult,
   PRSequenceResult
-} from './lib/test-manager';
+} from './lib/e2e-manager';
 
 export type {
-  TunnelConfig,
-  TunnelInfo,
-  TunnelManagerOptions
-} from './lib/tunnel-manager';
+  TunnelInfo
+} from './lib/tunnel-service';
 
 export type {
   ServerConfig,
@@ -52,11 +49,6 @@ export type {
   ServerManagerOptions
 } from './lib/server-manager';
 
-export type {
-  WorkflowConfig,
-  WorkflowResult,
-  WorkflowOptions
-} from './lib/workflow-orchestrator';
 
 /**
  * Default configuration values
@@ -104,9 +96,9 @@ export async function runDebuggAITests(options: {
   testFiles?: string[];
   error?: string;
 }> {
-  const { TestManager } = await import('./lib/test-manager');
-  
-  const testManager = new TestManager({
+  const { E2EManager } = await import('./lib/e2e-manager');
+
+  const e2eManager = new E2EManager({
     apiKey: options.apiKey,
     repoPath: options.repoPath || process.cwd(),
     baseUrl: options.baseUrl || 'https://api.debugg.ai',
@@ -120,7 +112,7 @@ export async function runDebuggAITests(options: {
 
   // Wait for server if requested
   if (options.waitForServer) {
-    const serverReady = await testManager.waitForServer(
+    const serverReady = await e2eManager.waitForServer(
       options.serverPort || DEFAULT_CONFIG.DEFAULT_SERVER_PORT,
       DEFAULT_CONFIG.DEFAULT_SERVER_WAIT_TIME
     );
@@ -134,7 +126,7 @@ export async function runDebuggAITests(options: {
   }
 
   // Run tests
-  const result = await testManager.runCommitTests();
+  const result = await e2eManager.runCommitTests();
   
   const response: {
     success: boolean;
@@ -158,104 +150,3 @@ export async function runDebuggAITests(options: {
   return response;
 }
 
-/**
- * Execute complete workflow with server management and tunnel setup
- */
-export async function runWorkflow(options: {
-  apiKey: string;
-  repoPath?: string;
-  baseUrl?: string;
-  testOutputDir?: string;
-  downloadArtifacts?: boolean;
-  prSequence?: boolean;
-  baseBranch?: string;
-  headBranch?: string;
-  serverCommand?: string;
-  serverArgs?: string[];
-  serverPort?: number;
-  ngrokAuthToken?: string;
-  ngrokSubdomain?: string;
-  ngrokDomain?: string;
-  baseDomain?: string;
-  maxTestWaitTime?: number;
-  serverTimeout?: number;
-  cleanup?: boolean;
-  verbose?: boolean;
-}): Promise<{
-  success: boolean;
-  tunnelUrl?: string;
-  serverUrl?: string;
-  suiteUuid?: string;
-  testFiles?: string[];
-  error?: string;
-}> {
-  const { WorkflowOrchestrator } = await import('./lib/workflow-orchestrator');
-  
-  const orchestrator = new WorkflowOrchestrator({
-    ngrokAuthToken: options.ngrokAuthToken || undefined,
-    baseDomain: options.baseDomain || undefined,
-    verbose: options.verbose || undefined
-  });
-
-  const workflowConfig = {
-    server: {
-      command: options.serverCommand || 'npm',
-      args: options.serverArgs || ['start'],
-      port: options.serverPort || DEFAULT_CONFIG.DEFAULT_SERVER_PORT,
-      cwd: options.repoPath || process.cwd(),
-      startupTimeout: options.serverTimeout || DEFAULT_CONFIG.DEFAULT_SERVER_WAIT_TIME
-    },
-    tunnel: {
-      port: options.serverPort || DEFAULT_CONFIG.DEFAULT_SERVER_PORT,
-      subdomain: options.ngrokSubdomain || undefined,
-      customDomain: options.ngrokDomain || undefined,
-      authtoken: options.ngrokAuthToken || undefined
-    },
-    test: {
-      apiKey: options.apiKey,
-      baseUrl: options.baseUrl || DEFAULT_CONFIG.BASE_URL,
-      repoPath: options.repoPath || process.cwd(),
-      testOutputDir: options.testOutputDir || DEFAULT_CONFIG.TEST_OUTPUT_DIR,
-      maxTestWaitTime: options.maxTestWaitTime || DEFAULT_CONFIG.MAX_TEST_WAIT_TIME,
-      downloadArtifacts: options.downloadArtifacts || false,
-      prSequence: options.prSequence || false,
-      baseBranch: options.baseBranch,
-      headBranch: options.headBranch
-    },
-    cleanup: {
-      onSuccess: options.cleanup !== false,
-      onError: options.cleanup !== false
-    }
-  };
-
-  const result = await orchestrator.executeWorkflow(workflowConfig);
-  
-  const response: {
-    success: boolean;
-    tunnelUrl?: string;
-    serverUrl?: string;
-    suiteUuid?: string;
-    testFiles?: string[];
-    error?: string;
-  } = {
-    success: result.success
-  };
-
-  if (result.tunnelInfo?.url) {
-    response.tunnelUrl = result.tunnelInfo.url;
-  }
-  if (result.serverUrl) {
-    response.serverUrl = result.serverUrl;
-  }
-  if (result.testResult?.suiteUuid) {
-    response.suiteUuid = result.testResult.suiteUuid;
-  }
-  if (result.testResult?.testFiles) {
-    response.testFiles = result.testResult.testFiles;
-  }
-  if (result.error) {
-    response.error = result.error;
-  }
-
-  return response;
-}

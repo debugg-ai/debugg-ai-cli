@@ -132,7 +132,7 @@ export class CLIBackendClient {
 
     /**
      * High-level method to create commit test suite
-     * This matches the functionality expected by TestManager
+     * This matches the functionality expected by E2EManager
      */
     async createCommitTestSuite(request: {
         type?: 'pull_request' | 'commit'; // Type of test request
@@ -161,7 +161,6 @@ export class CLIBackendClient {
         tunnelMetadata?: Record<string, any>; // Alternative field for PR testing
         context?: Record<string, any>;
         prNumber?: number; // Pull request number for GitHub integrations
-        pr_number?: number; // Alternative field name for PR testing
     }): Promise<{ success: boolean; testSuiteUuid?: string; tunnelKey?: string; error?: string }> {
         try {
             await this.ensureInitialized();
@@ -181,7 +180,7 @@ export class CLIBackendClient {
                     type: 'ngrok_tunnel' as const,
                     metadata: request.tunnelMetadata
                 } : undefined),
-                prNumber: request.prNumber || request.pr_number, // Support both field names
+                prNumber: request.prNumber || request.prNumber, // Support both field names
                 ...request.context
             };
 
@@ -198,10 +197,20 @@ export class CLIBackendClient {
             const commitSuite = await this.e2es.createE2eCommitSuite(request.testDescription, payload);
 
             if (commitSuite?.uuid) {
+                const tunnelKey = (commitSuite as any).tunnelKey;
+
+                // Log tunnel key status for debugging
+                if (tunnelKey) {
+                    log.info(`Test suite created with tunnel key (length: ${tunnelKey.length})`);
+                } else {
+                    log.warn('Test suite created but no tunnel key provided by backend');
+                    log.warn('This may be expected for certain test configurations');
+                }
+
                 return {
                     success: true,
                     testSuiteUuid: commitSuite.uuid,
-                    tunnelKey: (commitSuite as any).tunnelKey // Backend provides tunnel key for ngrok setup
+                    tunnelKey: tunnelKey // Backend provides tunnel key for ngrok setup
                 };
             } else {
                 return {
@@ -313,5 +322,87 @@ export class CLIBackendClient {
     async downloadArtifactToFile(url: string, filePath: string, originalBaseUrl?: string): Promise<boolean> {
         const { downloadArtifactToFile } = await import('../../util/artifact-downloader');
         return downloadArtifactToFile(url, filePath, originalBaseUrl);
+    }
+
+    /**
+     * Create tunnel token for a test suite
+     * This gets an ngrok auth token from the backend for the given test suite
+     */
+    async createTunnelToken(suiteUuid: string, subdomain: string): Promise<{ token: string; subdomain: string }> {
+        try {
+            // Log the full request details for debugging
+            const baseUrl = (this.transport as any).axios?.defaults?.baseURL || 'unknown';
+            const fullUrl = `${baseUrl}api/v1/ngrok/token/`.replace(/\/+/g, '/').replace(':/', '://');
+
+            log.info('Creating tunnel token', {
+                suiteUuid,
+                subdomain,
+                endpoint: '/api/v1/ngrok/token/',
+                fullUrl,
+                baseUrl
+            });
+
+            const response: any = await this.transport.post('/api/v1/ngrok/token/', {
+                commitSuiteUuid: suiteUuid,
+                subdomain: subdomain
+            });
+
+            if (!response || !response.token) {
+                log.error('Invalid tunnel token response from backend', {
+                    hasResponse: !!response,
+                    hasToken: !!(response?.token),
+                    responseKeys: response ? Object.keys(response) : [],
+                    fullResponse: response
+                });
+                throw new Error('Invalid tunnel token response from backend - missing token field');
+            }
+
+            log.success(`Tunnel token created successfully (subdomain: ${response.subdomain || subdomain}, token length: ${response.token?.length})`);
+
+            return {
+                token: response.token,
+                subdomain: response.subdomain || subdomain
+            };
+        } catch (error) {
+            // Log the full error details
+            log.error('Failed to create tunnel token');
+            if (error instanceof Error) {
+                log.error(`Error message: ${error.message}`);
+                if (error.stack) {
+                    log.debug(`Stack trace: ${error.stack}`);
+                }
+            } else {
+                log.error(`Error details: ${JSON.stringify(error)}`);
+            }
+
+            // Re-throw with more context
+            if (error instanceof Error && error.message.includes('404')) {
+                throw new Error(
+                    'Tunnel token endpoint not found (404). ' +
+                    'This might indicate an API version mismatch or the endpoint is not available. ' +
+                    'Please verify the API endpoint path: /api/v1/ngrok/token/'
+                );
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * Update commit test suite with tunnel information
+     */
+    async updateCommitTestSuite(suiteUuid: string, updates: {
+        publicUrl?: string;
+        testEnvironment?: {
+            url: string;
+            type: string;
+        };
+    }): Promise<void> {
+        try {
+            await this.transport.patch(`/api/v1/commit-suites/${suiteUuid}/`, updates);
+            log.debug('Updated test suite with tunnel information');
+        } catch (error) {
+            log.error('Failed to update test suite', { error });
+            throw error;
+        }
     }
 }
