@@ -114,7 +114,9 @@ export class E2EManager {
     systemLogger.info(`Tunnel will forward to local port: ${this.options.serverPort}`, { category: 'tunnel' });
 
     // Create tunnel using our TunnelService with the backend-provided token
-    this.tunnelService = new TunnelService({ verbose: false });
+    // Enable verbose mode if DEBUG is set
+    const verboseMode = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
+    this.tunnelService = new TunnelService({ verbose: verboseMode });
     this.activeTunnel = await this.tunnelService.createTunnel(
       this.options.serverPort,
       subdomain,

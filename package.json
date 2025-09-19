@@ -10,7 +10,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && mkdir -p dist/services/ngrok && cp src/services/ngrok/ngrok-config.yml dist/services/ngrok/",
     "dev": "tsc --watch",
     "prepublishOnly": "npm run build",
     "test": "jest",

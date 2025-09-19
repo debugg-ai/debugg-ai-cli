@@ -4,6 +4,8 @@
  * Uses ngrok directly to avoid dependency issues with the services layer
  */
 
+import * as path from 'path';
+
 export interface TunnelInfo {
   url: string;
   port: number;
@@ -66,16 +68,27 @@ export class TunnelService {
       const ngrokModule = await loadNgrok();
 
       // Set the auth token
+      if (this.verbose) {
+        console.log(`Setting ngrok auth token (length: ${authToken.length})`);
+      }
       await ngrokModule.authtoken({ authtoken: authToken });
 
-      // Create tunnel options
+      // Create tunnel options with config file path
+      // Config file is copied to dist/services/ngrok during build
+      const configPath = path.join(__dirname, '..', 'services', 'ngrok', 'ngrok-config.yml');
+
       const tunnelOptions = {
         proto: 'http' as const,
         addr: port,
         hostname: `${subdomain}.ngrok.debugg.ai`,
         authtoken: authToken,
-        onLogEvent: (data: any) => {if (this.verbose) console.log('onLogEvent', data)}
+        onLogEvent: (data: any) => {if (this.verbose) console.log('onLogEvent', data)},
+        configPath: configPath
       };
+
+      if (this.verbose) {
+        console.log(`Using ngrok config from: ${configPath}`);
+      }
 
       if (this.verbose) {
         console.log('Creating ngrok tunnel with options:', {
@@ -84,7 +97,7 @@ export class TunnelService {
         });
       }
 
-      // Create the tunnel
+      // Create the tunnel - no fallback as it won't work with our account
       const url = await ngrokModule.connect(tunnelOptions);
 
       if (!url) {
@@ -114,9 +127,10 @@ export class TunnelService {
 
       // Provide more user-friendly error messages
       if (errorMessage.includes('invalid tunnel configuration') ||
-          errorMessage.includes('authtoken') ||
-          errorMessage.includes('authentication')) {
-        throw new Error(`Invalid ngrok auth token. Please check your authentication credentials.`);
+          errorMessage.includes('401') ||
+          errorMessage.includes('unauthorized') ||
+          errorMessage.includes('forbidden')) {
+        throw new Error(`Invalid ngrok auth token or insufficient permissions for custom domain. Token may not support ${subdomain}.ngrok.debugg.ai`);
       } else if (errorMessage.includes('ECONNREFUSED')) {
         throw new Error(`Cannot connect to localhost:${port}. Please ensure your server is running on port ${port}.`);
       } else if (errorMessage.includes('hostname') ||
