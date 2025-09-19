@@ -235,12 +235,22 @@ class TunnelManager {
       logger.info(`Setting ngrok auth token`);
       await ngrok.authtoken({ authtoken: authToken });
       
+      // Kill any existing ngrok process to ensure clean state
+      try {
+        logger.debug(`Killing any existing ngrok processes`);
+        await ngrok.kill();
+      } catch (killError) {
+        // Ignore error - ngrok might not be running
+        logger.debug(`No existing ngrok process to kill: ${killError}`);
+      }
+
       // Create tunnel options
       const tunnelOptions = {
         proto: 'http' as const,
         addr: process.env.DOCKER_CONTAINER === "true" ? `host.docker.internal:${port}` : port,
         hostname: tunnelDomain,
         authtoken: authToken,
+        name: tunnelId, // IMPORTANT: Provide explicit name to prevent ngrok from auto-generating one
         onLogEvent: (data: any) => {console.log('onLogEvent', data)}, // returns stdout messages from ngrok process
         // Don't override configPath - let ngrok use its default configuration
       };
