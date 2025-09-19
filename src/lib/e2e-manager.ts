@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto';
 import { CLIBackendClient } from '../backend/cli/client';
 import { GitAnalyzer, WorkingChanges } from './git-analyzer';
-import { TunnelService, TunnelInfo } from './tunnel-service';
+import { tunnelManager, TunnelInfo as TunnelManagerInfo } from '../services/ngrok/tunnelManager';
 import * as fs from 'fs-extra';
 import * as path from 'path';
 import { systemLogger } from '../util/system-logger';
@@ -58,8 +58,8 @@ export interface PRSequenceResult {
 export class E2EManager {
   private client: CLIBackendClient;
   private gitAnalyzer: GitAnalyzer;
-  private tunnelService: TunnelService | null = null;
-  private activeTunnel: TunnelInfo | null = null;
+  private activeTunnelId: string | null = null;
+  private activeTunnel: TunnelManagerInfo | null = null;
   private urlUuidSubdomain: string | null = null;  // Stores the UUID for the tunnel subdomain
   private options: E2EManagerOptions;
 
@@ -108,29 +108,33 @@ export class E2EManager {
 
     // Use the UUID subdomain that we sent to the backend
     // This ensures the tunnel URL matches what the backend expects
-    const subdomain = this.urlUuidSubdomain || `${suiteUuid.substring(0, 8)}`;
+    const tunnelId = this.urlUuidSubdomain || `${suiteUuid.substring(0, 8)}`;
 
-    systemLogger.info(`Creating tunnel with subdomain: ${subdomain}`, { category: 'tunnel' });
+    systemLogger.info(`Creating tunnel with subdomain: ${tunnelId}`, { category: 'tunnel' });
     systemLogger.info(`Tunnel will forward to local port: ${this.options.serverPort}`, { category: 'tunnel' });
 
-    // Create tunnel using our TunnelService with the backend-provided token
-    // Enable verbose mode if DEBUG is set
-    const verboseMode = process.env.DEBUG === 'true' || process.env.DEBUG === '1';
-    this.tunnelService = new TunnelService({ verbose: verboseMode });
-    this.activeTunnel = await this.tunnelService.createTunnel(
-      this.options.serverPort,
-      subdomain,
-      tunnelKey
-    );
+    // Create the localhost URL that we want to tunnel
+    const localhostUrl = `http://localhost:${this.options.serverPort}`;
 
-    systemLogger.info(`Tunnel successfully created: ${this.activeTunnel.url}`, { category: 'tunnel' });
-    systemLogger.info(`Expected URL format: https://${subdomain}.ngrok.debugg.ai`, { category: 'tunnel' });
+    // Use tunnelManager to process the URL and create tunnel
+    const tunnelResult = await tunnelManager.processUrl(localhostUrl, tunnelKey, tunnelId);
+
+    if (!tunnelResult.isLocalhost || !tunnelResult.tunnelId) {
+      throw new Error('Failed to create tunnel: processUrl did not return a tunnel');
+    }
+
+    // Store tunnel information
+    this.activeTunnelId = tunnelResult.tunnelId;
+    this.activeTunnel = tunnelManager.getTunnelInfo(tunnelResult.tunnelId) || null;
+
+    systemLogger.info(`Tunnel successfully created: ${tunnelResult.url}`, { category: 'tunnel' });
+    systemLogger.info(`Expected URL format: https://${tunnelId}.ngrok.debugg.ai`, { category: 'tunnel' });
 
     // Update test suite with tunnel URL
     await this.client.updateCommitTestSuite(suiteUuid, {
-      publicUrl: this.activeTunnel.url,
+      publicUrl: tunnelResult.url,
       testEnvironment: {
-        url: this.activeTunnel.url,
+        url: tunnelResult.url,
         type: 'ngrok_tunnel' as const
       }
     });
@@ -140,14 +144,14 @@ export class E2EManager {
    * Cleanup resources (tunnel, etc.)
    */
   async cleanup(): Promise<void> {
-    if (this.tunnelService) {
+    if (this.activeTunnelId) {
       try {
-        await this.tunnelService.cleanup();
+        await tunnelManager.stopTunnel(this.activeTunnelId);
         systemLogger.debug('Tunnel cleaned up', { category: 'tunnel' });
       } catch (error) {
         systemLogger.warn(`Failed to cleanup tunnel: ${error}`, { category: 'tunnel' });
       }
-      this.tunnelService = null;
+      this.activeTunnelId = null;
       this.activeTunnel = null;
     }
   }

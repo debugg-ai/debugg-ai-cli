@@ -8,7 +8,6 @@
 export { CLIBackendClient } from './backend/cli/client';
 export { GitAnalyzer } from './lib/git-analyzer';
 export { E2EManager } from './lib/e2e-manager';
-export { TunnelService } from './lib/tunnel-service';
 export { ServerManager } from './lib/server-manager';
 
 export type {
@@ -39,9 +38,8 @@ export type {
   PRSequenceResult
 } from './lib/e2e-manager';
 
-export type {
-  TunnelInfo
-} from './lib/tunnel-service';
+// Note: TunnelInfo is now available from './services/ngrok/tunnelManager'
+// export type { TunnelInfo } from './services/ngrok/tunnelManager';
 
 export type {
   ServerConfig,

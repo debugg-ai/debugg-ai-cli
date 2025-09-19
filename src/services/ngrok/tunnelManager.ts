@@ -3,19 +3,14 @@
  * Provides high-level tunnel management abstraction for localhost URLs
  */
 
-import { Logger } from '../../utils/logger.js';
-import { isLocalhostUrl, extractLocalhostPort, generateTunnelUrl } from '../../utils/urlParser.js';
 import { v4 as uuidv4 } from 'uuid';
-import { createRequire } from 'module';
 
-// Use createRequire to avoid ES module resolution issues
-const require = createRequire(import.meta.url);
 let ngrokModule: any = null;
 
 async function getNgrok() {
   if (!ngrokModule) {
     try {
-      ngrokModule = require('ngrok');
+      ngrokModule = await import('ngrok');
     } catch (error) {
       throw new Error(`Failed to load ngrok module: ${error}`);
     }
@@ -23,7 +18,42 @@ async function getNgrok() {
   return ngrokModule;
 }
 
-const logger = new Logger({ module: 'tunnelManager' });
+// Simple logger for CLI environment
+const logger = {
+  debug: (msg: string, ...args: any[]) => console.debug(`[tunnelManager] ${msg}`, ...args),
+  info: (msg: string, ...args: any[]) => console.log(`[tunnelManager] ${msg}`, ...args),
+  warn: (msg: string, ...args: any[]) => console.warn(`[tunnelManager] ${msg}`, ...args),
+  error: (msg: string, ...args: any[]) => console.error(`[tunnelManager] ${msg}`, ...args),
+  success: (msg: string, ...args: any[]) => console.log(`[tunnelManager] ✓ ${msg}`, ...args)
+};
+
+// URL utility functions for CLI
+function isLocalhostUrl(url: string): boolean {
+  const lowerUrl = url.toLowerCase();
+  return lowerUrl.includes('localhost') || lowerUrl.includes('127.0.0.1');
+}
+
+function extractLocalhostPort(url: string): number | null {
+  const match = url.match(/localhost:(\d+)|127\.0\.0\.1:(\d+)/);
+  if (match) {
+    const portStr = match[1] || match[2];
+    if (portStr) {
+      const port = parseInt(portStr, 10);
+      return isNaN(port) ? null : port;
+    }
+  }
+  return null;
+}
+
+function generateTunnelUrl(originalUrl: string, tunnelId: string): string {
+  try {
+    const url = new URL(originalUrl);
+    return `https://${tunnelId}.ngrok.debugg.ai${url.pathname}${url.search}${url.hash}`;
+  } catch {
+    // Fallback for malformed URLs
+    return `https://${tunnelId}.ngrok.debugg.ai`;
+  }
+}
 
 export interface TunnelInfo {
   tunnelId: string;
@@ -165,7 +195,7 @@ class TunnelManager {
    */
   extractTunnelId(url: string): string | null {
     const match = url.match(/https?:\/\/([^.]+)\.ngrok\.debugg\.ai/);
-    return match ? match[1] : null;
+    return match && match[1] ? match[1] : null;
   }
 
   /**
@@ -202,7 +232,7 @@ class TunnelManager {
       const ngrok = await getNgrok();
       
       // Set auth token first
-      logger.debug(`Setting ngrok auth token`);
+      logger.info(`Setting ngrok auth token`);
       await ngrok.authtoken({ authtoken: authToken });
       
       // Create tunnel options
@@ -215,25 +245,15 @@ class TunnelManager {
         // Don't override configPath - let ngrok use its default configuration
       };
       
-      logger.debug(`Connecting tunnel with options: ${JSON.stringify({ ...tunnelOptions, authtoken: '[REDACTED]' })}`);
+      logger.info(`Connecting tunnel with options: ${JSON.stringify({ ...tunnelOptions, authtoken: '[REDACTED]' })}`);
       
       // For ngrok v5, we might need to handle the connection differently
       let tunnelUrl: string;
       try {
         tunnelUrl = await ngrok.connect(tunnelOptions);
       } catch (connectError) {
-        // If connection fails due to ngrok not running, try with different options
-        if (connectError instanceof Error && connectError.message.includes('ECONNREFUSED')) {
-          logger.info('ngrok daemon not running, attempting to start tunnel with minimal options');
-          const minimalOptions = {
-            proto: 'http' as const,
-            addr: process.env.DOCKER_CONTAINER === "true" ? `host.docker.internal:${port}` : port,
-            authtoken: authToken
-          };
-          tunnelUrl = await ngrok.connect(minimalOptions);
-        } else {
-          throw connectError;
-        }
+        logger.error(`Failed to create tunnel:`, connectError);
+        throw connectError;
       }
       if (!tunnelUrl) {
         throw new Error('Failed to create tunnel');
