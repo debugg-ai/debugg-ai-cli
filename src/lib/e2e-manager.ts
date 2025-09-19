@@ -130,14 +130,6 @@ export class E2EManager {
     systemLogger.info(`Tunnel successfully created: ${tunnelResult.url}`, { category: 'tunnel' });
     systemLogger.info(`Expected URL format: https://${tunnelId}.ngrok.debugg.ai`, { category: 'tunnel' });
 
-    // Update test suite with tunnel URL
-    await this.client.updateCommitTestSuite(suiteUuid, {
-      publicUrl: tunnelResult.url,
-      testEnvironment: {
-        url: tunnelResult.url,
-        type: 'ngrok_tunnel' as const
-      }
-    });
   }
 
   /**

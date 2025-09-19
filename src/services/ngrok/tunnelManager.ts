@@ -264,7 +264,7 @@ class TunnelManager {
         hostname: tunnelDomain,
         authtoken: authToken,
         name: tunnelId, // IMPORTANT: Provide explicit name to prevent ngrok from auto-generating one
-        onLogEvent: (data: any) => {console.log('onLogEvent', data)}, // returns stdout messages from ngrok process
+        onLogEvent: (data: any) => {console.debug('onLogEvent', data)}, // returns stdout messages from ngrok process
         // Don't override configPath - let ngrok use its default configuration
       };
 
