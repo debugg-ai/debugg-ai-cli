@@ -283,15 +283,27 @@ class TunnelManager {
           break; // Success - exit the retry loop
         } catch (connectError) {
           lastError = connectError;
-          logger.warn(`Tunnel connection attempt ${attempt} failed:`, connectError);
+          logger.warn(`Tunnel connection attempt ${attempt} failed:`);
+          logger.debug(`Error:`, connectError);
 
           if (attempt < MAX_RETRIES) {
             logger.info(`Retrying in ${RETRY_DELAY}ms...`);
             await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
 
-            // Try to clean up before retry
+            // Try to clean up the specific tunnel name before retry
             try {
-              await ngrok.disconnect();
+              // First try to disconnect by tunnel URL (if ngrok returned it)
+              const api = ngrok.getApi();
+              if (api) {
+                logger.debug(`Attempting to cleanup existing tunnel with name: ${tunnelId}`);
+                // Get all tunnels and disconnect the one with our name
+                const tunnels = await ngrok.default.tunnels();
+                const existingTunnel = tunnels.find((t: any) => t.name === tunnelId);
+                if (existingTunnel) {
+                  logger.debug(`Found existing tunnel with matching name, disconnecting: ${existingTunnel.public_url}`);
+                  await ngrok.disconnect(existingTunnel.public_url);
+                }
+              }
             } catch (disconnectErr) {
               logger.debug(`Cleanup before retry failed: ${disconnectErr}`);
             }
